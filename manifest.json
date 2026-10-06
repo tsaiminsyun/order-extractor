@@ -1,16 +1,47 @@
 {
   "manifest_version": 3,
-  "name": "My First Extension",
-  "version": "1.0.0",
-  "description": "My first Chrome extension",
+  "name": "訂單擷取（Amazon.co.jp / 楽天）",
+  "version": "0.12.0",
+  "description": "擷取 Amazon.co.jp 與 楽天市場 的訂單內容，並匯出 JSON",
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "訂單擷取（Amazon.co.jp / 楽天）"
   },
-  "permissions": ["activeTab", "scripting"],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "https://www.amazon.co.jp/*",
+    "https://order.my.rakuten.co.jp/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "frame_rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["popup.js"]
+      "matches": [
+        "https://www.amazon.co.jp/gp/css/order-history*",
+        "https://www.amazon.co.jp/your-orders/*",
+        "https://www.amazon.co.jp/gp/your-account/order-history*",
+        "https://order.my.rakuten.co.jp/purchase-history/*"
+      ],
+      "js": [
+        "src/content/util.js",
+        "src/content/readers.js",
+        "src/content/sites/amazon.js",
+        "src/content/sites/rakuten.js",
+        "src/content/main.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }

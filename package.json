@@ -1,0 +1,15 @@
+{
+  "name": "order-scraper-extension",
+  "version": "0.12.0",
+  "private": true,
+  "description": "Amazon.co.jp / 楽天 訂單擷取 Chrome 擴充功能",
+  "scripts": {
+    "test": "node tests/run.cjs",
+    "e2e": "node tests/e2e.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.3",
+    "puppeteer": "^23.0.0"
+  },
+  "type": "module"
+}

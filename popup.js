@@ -1,13 +1,176 @@
-document.getElementById('changeColor').addEventListener('click', async () => {
-  const [tab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true,
-  });
+import { ordersToJson, downloadText, stamp } from './src/lib/export.js';
 
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => {
-      document.body.style.backgroundColor = 'yellow';
-    },
-  });
+const SITES = [
+  { label: 'Amazon.co.jp', host: 'amazon.co.jp', url: 'https://www.amazon.co.jp/gp/css/order-history' },
+  { label: '楽天市場', host: 'rakuten.co.jp', url: 'https://order.my.rakuten.co.jp/purchase-history/order-list/' },
+];
+const CONTENT_SCRIPTS = [
+  "src/content/util.js",
+  "src/content/readers.js",
+  "src/content/sites/amazon.js",
+  "src/content/sites/rakuten.js",
+  "src/content/main.js",
+];
+const PREVIEW_LIMIT = 100;
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  version: $('version'),
+  status: $('status'),
+  scrape: $('scrape'),
+  progress: $('progress'),
+  result: $('result'),
+  preview: $('preview'),
+  saveJson: $('saveJson'),
+};
+
+let lastResult = null;
+
+/* ---------- 小工具 ---------- */
+
+const yen = (n) => (typeof n === 'number' ? `¥${n.toLocaleString('ja-JP')}` : '');
+
+// 檔名帶上站台，兩個站台的匯出檔才不會搞混
+const filename = (ext) => `${lastResult?.site || 'orders'}-orders-${stamp()}.${ext}`;
+
+function el(tag, { className, text, title } = {}) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  if (title) node.title = title;
+  return node;
+}
+
+function setStatus(text, isError = false) {
+  els.status.textContent = text;
+  els.status.classList.toggle('error', isError);
+}
+
+function setProgress(text) {
+  els.progress.classList.toggle('hidden', !text);
+  els.progress.textContent = text || '';
+}
+
+/* ---------- 分頁 ---------- */
+
+async function activeTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+// 擴充功能剛重新載入時，既有分頁裡沒有 content script，需要補打進去
+async function ensureContentScript(tabId) {
+  try {
+    const pong = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
+    if (pong?.ok) return pong;
+  } catch { /* 尚未注入 */ }
+  await chrome.scripting.executeScript({ target: { tabId }, files: CONTENT_SCRIPTS });
+  return chrome.tabs.sendMessage(tabId, { type: 'PING' });
+}
+
+/* ---------- 結果 ---------- */
+
+function renderPreview(orders) {
+  const rows = orders
+    .flatMap((o) => (o.items.length ? o.items : [{ title: '（未解析到商品）' }]).map((it) => ({ o, it })))
+    .slice(0, PREVIEW_LIMIT)
+    .map(({ o, it }) => {
+      const tr = el('tr');
+      const title = el('td');
+      title.append(el('span', { className: 'title', text: it.title, title: it.title }));
+      // 數量 1 件是常態，只在 2 件以上時標示
+      if (it.quantity > 1) title.append(el('span', { className: 'qty', text: ' ×' + it.quantity }));
+      tr.append(
+        el('td', { text: o.orderId }),
+        title,
+        el('td', { className: 'num', text: yen(o.total) }),
+        el('td', { text: [o.carrier, o.trackingId].filter(Boolean).join(' ') })
+      );
+      return tr;
+    });
+
+  const table = el('table');
+  table.innerHTML = '<thead><tr><th>注文番号</th><th>品名</th><th>合計</th><th>配送業者 / ID</th></tr></thead>';
+  const tbody = el('tbody');
+  tbody.append(...rows);
+  table.append(tbody);
+  els.preview.replaceChildren(table);
+}
+
+function render(result) {
+  lastResult = result;
+  renderPreview(result.orders);
+  els.result.classList.remove('hidden');
+  els.saveJson.disabled = !result.orders.length;
+}
+
+/* ---------- 事件 ---------- */
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.type !== 'SCRAPE_PROGRESS') return;
+  if (msg.phase === 'lookup') {
+    setProgress(`讀取詳細資料 ${msg.done} / ${msg.total}…`);
+  } else {
+    const verb = msg.phase === 'fetching' ? '讀取' : '解析';
+    setProgress(`${verb}第 ${msg.page} 頁…（已取得 ${msg.orders} 筆訂單）`);
+  }
 });
+
+els.scrape.addEventListener('click', async () => {
+  els.scrape.disabled = true;
+  setStatus('已就緒'); // 清掉上一次失敗留下的錯誤訊息
+  setProgress('開始擷取…');
+  try {
+    const tab = await activeTab();
+    // 結果由 content script 存進 storage，這裡只負責顯示
+    const result = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE' });
+    if (!result?.ok) throw new Error(result?.error || '擷取失敗');
+    setProgress('完成');
+    render(result);
+  } catch (err) {
+    setProgress('');
+    setStatus(`擷取失敗：${err.message}`, true);
+  } finally {
+    els.scrape.disabled = false;
+  }
+});
+
+els.saveJson.addEventListener('click', () => {
+  downloadText(filename('json'), ordersToJson(lastResult.orders));
+});
+
+/* ---------- 初始化 ---------- */
+
+async function checkTab() {
+  const tab = await activeTab();
+  const site = SITES.find((s) => tab?.url?.includes(s.host));
+  if (!site) {
+    setStatus('請先開啟訂單紀錄頁', true);
+    for (const s of SITES.slice().reverse()) {
+      const open = el('button', { className: 'open-site', text: `開啟 ${s.label} 訂單紀錄` });
+      open.addEventListener('click', () => chrome.tabs.create({ url: s.url }));
+      els.status.after(open);
+    }
+    return;
+  }
+  try {
+    const pong = await ensureContentScript(tab.id);
+    if (pong?.onOrderPage) {
+      setStatus(`已就緒（${pong.label}）`);
+      els.scrape.disabled = false;
+    } else {
+      setStatus(`目前不在 ${site.label} 的訂單紀錄頁，請切換後重試`, true);
+    }
+  } catch (err) {
+    setStatus(`無法連線到頁面：${err.message}（請重新整理分頁）`, true);
+  }
+}
+
+async function restoreLastResult() {
+  const { lastResult: saved } = await chrome.storage.local.get('lastResult');
+  if (saved?.orders?.length) render(saved);
+}
+
+els.version.textContent = `v${chrome.runtime.getManifest().version}`;
+checkTab();
+restoreLastResult();

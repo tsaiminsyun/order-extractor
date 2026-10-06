@@ -1,0 +1,8 @@
+node_modules/
+
+# Chrome 載入未封裝擴充功能時產生的
+_metadata/
+
+# 從實際站台存下來的原始頁面（含姓名 / 住址）。
+# 測試用的副本在 tests/fixtures/，個資已置換成假資料
+tmp/

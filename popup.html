@@ -1,11 +1,26 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
+    <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <button id="changeColor">Change Color</button>
+    <header>
+      <h1>訂單擷取 <span id="version" class="version"></span></h1>
+      <p id="status" class="status">檢查分頁中…</p>
+    </header>
 
-    <script src="popup.js"></script>
+    <button id="scrape" class="primary" disabled>擷取訂單</button>
+
+    <p id="progress" class="progress hidden"></p>
+
+    <section id="result" class="result hidden">
+      <div class="actions">
+        <button id="saveJson">下載 JSON</button>
+      </div>
+      <div class="preview" id="preview"></div>
+    </section>
+
+    <script type="module" src="popup.js"></script>
   </body>
 </html>

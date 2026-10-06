@@ -1,0 +1,56 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "_comment": "樂天的購買履歷頁回 x-frame-options: DENY，會讓擴充功能的隱藏 iframe 讀不到內容而被迫改開背景分頁。只在「購買履歷頁載入購買履歷頁」這種子框架請求上移除框架限制，其他情況不受影響。",
+    "action": {
+      "type": "modifyHeaders",
+      "responseHeaders": [
+        {
+          "header": "x-frame-options",
+          "operation": "remove"
+        },
+        {
+          "header": "content-security-policy",
+          "operation": "remove"
+        }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||order.my.rakuten.co.jp/purchase-history",
+      "initiatorDomains": [
+        "order.my.rakuten.co.jp"
+      ],
+      "resourceTypes": [
+        "sub_frame"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "_comment": "同上，給 Amazon 的配送狀況頁。目前 Amazon 沒有回 x-frame-options，這條是預防性的。",
+    "action": {
+      "type": "modifyHeaders",
+      "responseHeaders": [
+        {
+          "header": "x-frame-options",
+          "operation": "remove"
+        },
+        {
+          "header": "content-security-policy",
+          "operation": "remove"
+        }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||www.amazon.co.jp/progress-tracker/",
+      "initiatorDomains": [
+        "www.amazon.co.jp"
+      ],
+      "resourceTypes": [
+        "sub_frame"
+      ]
+    }
+  }
+]

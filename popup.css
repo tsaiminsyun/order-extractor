@@ -1,0 +1,96 @@
+:root {
+  --bg: #ffffff;
+  --fg: #16191c;
+  --muted: #6b7280;
+  --line: #e3e6e8;
+
+  /* 主色。各階的用途與對比見下方註解，數值都通過 WCAG AA（文字 4.5:1、框線 3:1） */
+  --accent: #00a0e8;         /* 主色：主按鈕底色、hover 邊框 */
+  --accent-light: #35b7ef;   /* 主按鈕 hover：往亮的方向走，深色字才不會變難讀 */
+  --accent-strong: #0086c6;  /* focus 外框：白底上 4.0:1，深色底上 4.1:1 */
+  --accent-weak: #eff9fe;    /* 淡底：次要按鈕 hover、表頭 */
+  --accent-fg: #04202e;      /* 亮藍底上的字，5.8:1（白字只有 2.9:1，不到 4.5:1） */
+
+  --warn: #b45309;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1f23;
+    --fg: #e8eaed;
+    --muted: #9aa3ad;
+    --line: #333a41;
+    --accent-weak: #11303f;
+    --warn: #fbbf24;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 420px;
+  margin: 0;
+  padding: 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 -apple-system, "Hiragino Sans", "Noto Sans TC", sans-serif;
+}
+
+h1 { margin: 0 0 4px; font-size: 15px; }
+
+.version { font-weight: 400; font-size: 11px; color: var(--muted); }
+
+.status { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+.status.error { color: var(--warn); }
+
+button {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+button:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.primary {
+  width: 100%;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-light);
+  border-color: var(--accent-light);
+}
+
+.open-site { width: 100%; margin-bottom: 6px; }
+
+.progress { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+
+.result { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.actions { display: flex; gap: 6px; margin-bottom: 10px; }
+.actions button { flex: 1; }
+
+.preview { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+th, td { padding: 5px 6px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+/* 表頭會固定在捲動區上方，底色必須不透明 */
+th { position: sticky; top: 0; background: var(--accent-weak); color: var(--muted); font-weight: 600; }
+td.num { text-align: right; white-space: nowrap; }
+.title { display: block; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.hidden { display: none; }
+
+.qty { color: var(--muted); white-space: nowrap; }
