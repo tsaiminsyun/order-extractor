@@ -25,8 +25,7 @@ module.exports = async function run() {
   {
     const main = read('src/content/main.js');
     const readers = read('src/content/readers.js');
-    c.eq('翻頁上限 50 頁', [md.includes('上限 50 頁'), main.includes('MAX_PAGES = 50')], [true, true]);
-    c.eq('翻頁間隔 400 ms', [md.includes('400 ms'), main.includes('DELAY_MS = 400')], [true, true]);
+    c.eq('只擷取目前頁面（沒有翻頁迴圈）', [md.includes('只擷取目前頁面'), /MAX_PAGES|nextPageUrl/.test(main)], [true, false]);
     c.eq('等渲染上限 15 秒', [md.includes('上限 15 秒'), readers.includes('RENDER_TIMEOUT_MS = 15000')], [true, true]);
     c.eq('部分欄位再等 2 秒', [md.includes('再等 2 秒'), readers.includes('PARTIAL_WAIT_MS = 2000')], [true, true]);
     c.eq('預覽上限 100 列', [md.includes('最多顯示 100 列'), read('popup.js').includes('PREVIEW_LIMIT = 100')], [true, true]);
@@ -59,7 +58,7 @@ module.exports = async function run() {
   /* 5. 站台轉接層的方法名 */
   {
     const amazon = read('src/content/sites/amazon.js');
-    const methods = ['isOrderPage', 'isSignInPage', 'firstPage', 'findOrders', 'nextPageUrl'];
+    const methods = ['isOrderPage', 'isSignInPage', 'findOrders'];
     const declared = (m) => amazon.includes(`${m}:`) || amazon.includes(`\n    ${m},`);
     c.eq('轉接層方法 README 與程式都有', methods.filter((m) => !(md.includes(m) && declared(m))), []);
   }

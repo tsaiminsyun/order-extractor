@@ -109,8 +109,6 @@
     orderListUrl: 'https://order.my.rakuten.co.jp/purchase-history/order-list/',
     isOrderPage: (loc) => /(^|\.)rakuten\.co\.jp$/.test(loc.hostname) && loc.pathname.includes('/purchase-history'),
     isSignInPage: (doc, url) => /grp\d+\.id\.rakuten\.co\.jp|\/login/.test(url) || !!doc.querySelector('#loginInner, input[name="u"]'),
-    firstPage: (loc) => ({ url: loc.href, useCurrent: true }),
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),
-    nextPageUrl: () => null, // 分頁規則待確認
   });
 })();

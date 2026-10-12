@@ -24,6 +24,8 @@ Chrome 擴充功能（Manifest V3），從訂單列表頁擷取配送中的訂�
 2. 點擴充功能圖示（popup 會顯示目前站台），按「擷取訂單」
 3. 按「下載 JSON」（檔名會帶站台，例如 `amazon-orders-20261006-0930.json`）
 
+**只擷取目前頁面** —— 看到哪一頁就抓哪一頁，不會自動翻頁。要抓別頁就在網站上翻過去再按一次。
+
 結果會存進 `chrome.storage.local`，popup 關掉再開還看得到上次的結果。預覽表格最多顯示 100 列，下載的 JSON 不受影響。
 
 ## 各站台的差異
@@ -37,7 +39,6 @@ Chrome 擴充功能（Manifest V3），從訂單列表頁擷取配送中的訂�
 | 合計 | 列表頁 | **注文詳細頁**（支払い金額 / Total amount） | 列表頁，詳細頁的 `RowTotal` 覆蓋 |
 | 配送業者 / 伝票番号 | **配送状況頁**（每個包裹一頁） | 日文列表頁；英文介面的列表頁沒有，改由**注文詳細頁**提供 | **注文詳細頁**的 `.fulfillment` |
 | 擷取條件 | 包裹有「配送状況を確認」按鈕（即配送中） | 訂單有伝票番号 | 商品有追蹤號 |
-| 自動翻頁 | 有（上限 50 頁，每頁間隔 400 ms） | 尚未實作（只抓目前頁） | 有（`nav.pagination`） |
 | 另外載入的頁面 | iframe（前端渲染） | iframe（前端渲染） | `fetch`（伺服器渲染，快很多） |
 
 ## 為什麼一定要多讀一頁
@@ -102,9 +103,9 @@ content script 依站台拆開，共用同一套流程（manifest 依序載入�
 | [util.js](src/content/util.js) | 共用小工具、切出訂單範圍（`climbUnique` / `cardsByOrderId`）、`fetch` 下一頁、隱藏 iframe 載入 |
 | [readers.js](src/content/readers.js) | 「要真的載入才讀得到」的頁面讀取器（Amazon 配送狀況頁 / 楽天 注文詳細頁），在隱藏 iframe 的文件上執行 |
 | [sites/amazon.js](src/content/sites/amazon.js)、[sites/rakuten.js](src/content/sites/rakuten.js)、[sites/shopify.js](src/content/sites/shopify.js) | 各站台的列表頁解析，回報要另外讀取哪些頁 |
-| [main.js](src/content/main.js) | 翻頁、解析、讀取詳細資料、訊息處理 |
+| [main.js](src/content/main.js) | 解析目前頁面、讀取詳細資料、訊息處理 |
 
-站台轉接層的介面：`isOrderPage(loc, doc)` / `isSignInPage` / `firstPage` / `findOrders` / `nextPageUrl`。
+站台轉接層的介面只有三個：`isOrderPage(loc, doc)` / `isSignInPage` / `findOrders`。
 要加新站台就多一個 `sites/*.js`，`main.js` 不用改。
 
 `isOrderPage` 收得到 `doc`，所以站台可以用**頁面特徵**判斷而不是網域 —— Shopify 轉接層就是這樣
@@ -151,7 +152,7 @@ content script 依站台拆開，共用同一套流程（manifest 依序載入�
 | 配送業者 / 追蹤番号 | 詳細頁的 `.fulfillment` 區塊，格式是 `{{ tracking_company }} #{{ tracking_number }}`。`#` 是樣板寫死的字元，不是翻譯，可直接當分隔符 |
 | 画像 | 訂單頁**沒有商品圖**。改用 `/products/{handle}.js` 取 `featured_image`，同一件商品只問一次 |
 
-訂單列表只有注文番号 / 日期 / 狀態 / 合計，所以**每筆訂單都要讀一次詳細頁**。
+訂單列表只有注文番号 / 日期 / 狀態 / 合計，所以**目前這一頁上的每筆訂單都要讀一次詳細頁**。
 那些頁面是伺服器渲染的，用 `fetch` 就夠，不必開 iframe。
 
 > fixture 是**依樣板輸出結構產生**的，不是實際擷取的頁面。結構正確，但實際商店可能改過佈景主題，
@@ -263,11 +264,11 @@ fixture 清單是否齊全、fixture 有沒有混進個資。改了程式忘了�
 
 ## 已知限制
 
-- 楽天尚未自動翻頁（只抓目前頁），需要第 2 頁的網址或「次へ」按鈕的 HTML 才能實作
+- **只擷取目前頁面**，不會自動翻頁。訂單多的時候要自己在網站上翻頁，每頁按一次
 - Shopify 的解析尚未用真實頁面驗證過（fixture 是依 Dawn 樣板產生的）
 - Shopify 的訂單列表看不出哪些訂單有追蹤號，所以列表上的每筆訂單都要讀一次詳細頁
 - 只解析訂單列表頁與配送狀況頁 / 注文詳細頁，不會讀配送先住所、支付方式、單價
 - 另外載入的頁面一律走隱藏 iframe。站台若擋住嵌入（`x-frame-options` / `content-security-policy: frame-ancestors`）
   且 [rules.json](rules.json) 沒涵蓋到，那一頁就讀不到，相關欄位留空
-- 需要本人登入狀態。第一頁就被導到登入頁時會中止並顯示訊息；翻頁途中才被導走的話，保留已取得的訂單
+- 需要本人登入狀態。被導到登入頁時會中止並顯示訊息
 - 解析依賴站台的 DOM 結構，改版可能失效。先跑 `npm test`，必要時把新的實際頁面放進 `tests/fixtures/` 再修

@@ -76,7 +76,7 @@ function setup(html, url, { pages } = {}) {
   };
   loadContentScripts();
   const scrape = (payload = {}) =>
-    new Promise((res) => listeners.at(-1)({ type: 'SCRAPE', payload: { delayMs: 0, ...payload } }, null, res));
+    new Promise((res) => listeners.at(-1)({ type: 'SCRAPE', payload }, null, res));
   const ping = () => new Promise((res) => listeners.at(-1)({ type: 'PING' }, null, res));
   return { dom, scrape, ping, asked, listeners };
 }

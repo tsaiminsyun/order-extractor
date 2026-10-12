@@ -1,11 +1,9 @@
-/* 擷取流程（各站台共用）：翻頁 → 解析訂單 → 讀取需要另外載入的頁面（配送資料 / 合計） */
+/* 擷取流程（各站台共用）：解析目前這一頁 → 讀取需要另外載入的頁面（配送資料 / 合計）。
+ * 只擷取使用者正在看的那一頁，不會自動翻頁。 */
 (() => {
   'use strict';
   const { sites, readers, util } = globalThis.OrderScraper;
-  const { sleep, fetchDoc, readInFrame } = util;
-
-  const MAX_PAGES = 50;  // 安全上限，避免無限翻頁
-  const DELAY_MS = 400;  // 翻頁之間的間隔，避免被判定為機器人
+  const { fetchDoc, readInFrame } = util;
 
   const currentSite = () => sites.find((s) => s.isOrderPage(location, document));
 
@@ -52,51 +50,20 @@
 
   /* ---------- 主流程 ---------- */
 
-  async function scrape({ maxPages = MAX_PAGES, delayMs = DELAY_MS, withLookups = true } = {}) {
+  async function scrape({ withLookups = true } = {}) {
     const site = currentSite();
     if (!site) throw new Error('目前頁面不是支援的訂單列表頁');
-
-    const orders = [];              // 擷取到的訂單
-    const seenOrderIds = new Set(); // 已處理過的注文番号（含略過的）
-    const visitedUrls = new Set();
-
-    const first = site.firstPage(location);
-    let url = first.url;
-    let page = 0;
-    while (url && page < maxPages && !visitedUrls.has(url)) {
-      visitedUrls.add(url);
-      page += 1;
-      progress({ phase: 'fetching', page, orders: orders.length });
-
-      // 目前分頁就是第一頁時直接用現有 DOM，不必再發 request
-      let loaded;
-      try {
-        loaded = page === 1 && first.useCurrent ? { doc: document, url: location.href } : await fetchDoc(url);
-      } catch (err) {
-        if (page === 1) throw err;
-        break; // 後面的頁讀取失敗時，保留已取得的訂單
-      }
-      const { doc, url: pageUrl } = loaded;
-
-      if (site.isSignInPage(doc, pageUrl)) {
-        if (page === 1) throw new Error('需要重新登入，請在分頁登入後再試一次');
-        break;
-      }
-
-      const found = site.findOrders(doc, pageUrl);
-      if (!found.length) break;
-
-      const fresh = found.filter((o) => o && !seenOrderIds.has(o.orderId));
-      if (!fresh.length) break; // 同樣的一頁重複出現，停止
-      for (const order of fresh) {
-        seenOrderIds.add(order.orderId);
-        orders.push(order);
-      }
-      progress({ phase: 'parsed', page, orders: orders.length });
-
-      url = site.nextPageUrl(doc, pageUrl, found.length);
-      if (url) await sleep(delayMs);
+    if (site.isSignInPage(document, location.href)) {
+      throw new Error('需要重新登入，請在分頁登入後再試一次');
     }
+
+    // 只看使用者眼前這一頁。要抓別頁就自己翻到那一頁再按一次
+    const found = site.findOrders(document, location.href).filter(Boolean);
+
+    // 同一筆注文番号在頁面上可能出現多次（桌機 / 手機版版面），只留第一筆
+    const seen = new Set();
+    const orders = found.filter((o) => !seen.has(o.orderId) && seen.add(o.orderId));
+    progress({ phase: 'parsed', orders: orders.length });
 
     if (withLookups && orders.length) await runLookups(orders);
 
@@ -110,7 +77,7 @@
       site: site.name,
       version: chrome.runtime.getManifest().version,
       scrapedAt: new Date().toISOString(),
-      pages: page,
+      pageUrl: location.href,
       orders: entries,
     };
     // popup 可能在擷取途中被關掉，先存起來，重開時仍看得到結果

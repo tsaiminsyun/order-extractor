@@ -9,7 +9,7 @@
  * 所以多語系不必比對字樣。其他佈景主題可能改過版面，因此每個欄位都再退一層結構判斷。
  *
  * 訂單列表只有注文番号 / 日期 / 狀態 / 合計，沒有商品與配送資訊，
- * 所以每筆訂單都要讀一次詳細頁。那些頁面是伺服器渲染的，用 fetch 就夠（不必 iframe）。
+ * 所以這一頁上的每筆訂單都要讀一次詳細頁。那些頁面是伺服器渲染的，用 fetch 就夠（不必 iframe）。
  */
 (() => {
   'use strict';
@@ -19,12 +19,11 @@
     orderTable: 'table.order-history',
     orderLink: 'a[href*="/account/orders/"]',
     total: 'td[headers~="ColumnTotal"]',
-    nextPage: '.pagination a[rel="next"], nav.pagination li:last-child a',
     signIn: 'form[action*="/account/login"]',
   };
 
+  // 訂單列表可能帶 ?page=N，那是查詢字串不影響 pathname
   const ACCOUNT_PATH_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?account(?:\/orders)?\/?$/i;
-  const ORDER_PATH_RE = /\/account\/orders\//;
 
   // 是不是 Shopify 站：看頁面特徵，不看網域。
   // 先用選擇器（快），都沒中才掃行內 script —— 不要序列化整份 DOM
@@ -89,33 +88,12 @@
     return order;
   }
 
-  function nextPageUrl(doc, pageUrl) {
-    for (const a of all(doc, SEL.nextPage)) {
-      const href = absUrl(attr(a, 'href'), pageUrl);
-      // 最後一個分頁項目可能是「目前頁」而不是「下一頁」，用 page 參數確認有往前走
-      if (!href) continue;
-      const next = Number(new URL(href).searchParams.get('page') || 0);
-      const now = Number(new URL(pageUrl).searchParams.get('page') || 1);
-      if (next > now) return href;
-    }
-    return null;
-  }
-
   globalThis.OrderScraper.sites.push({
     name: 'shopify',
     label: 'Shopify 商店',
     orderListUrl: '/account',
     isOrderPage: (loc, doc) => ACCOUNT_PATH_RE.test(loc.pathname) && isShopify(doc),
     isSignInPage: (doc, url) => /\/account\/login/.test(url) || !!doc.querySelector(SEL.signIn),
-    // 停在 ?page=1（或沒有 page 參數）才能直接用現有 DOM，否則要從第一頁重抓
-    firstPage: (loc) => {
-      const u = new URL(loc.href);
-      const useCurrent = Number(u.searchParams.get('page') || 1) === 1;
-      u.searchParams.delete('page');
-      return { url: u.href, useCurrent };
-    },
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),
-    nextPageUrl,
-    ORDER_PATH_RE,
   });
 })();

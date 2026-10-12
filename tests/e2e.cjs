@@ -179,7 +179,7 @@ const eq = (label, actual, expected) => {
       const started = Date.now();
       const result = await driver.evaluate(async (u) => {
         const [tab] = await chrome.tabs.query({ url: u });
-        return chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE', payload: { delayMs: 0 } });
+        return chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE' });
       }, url);
       return { result, secs: ((Date.now() - started) / 1000).toFixed(1) };
     };

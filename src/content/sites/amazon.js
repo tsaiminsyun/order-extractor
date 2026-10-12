@@ -13,8 +13,6 @@
     countContained, countMatches, countOrderIds, cardsByOrderId,
     outermost, byDocumentOrder } = globalThis.OrderScraper.util;
 
-  const PAGE_SIZE = 10;
-
   const SEL = {
     ordersRoot: '#ordersContainer, .your-orders-content-container, #yourOrdersContent',
     orderId: '.yohtmlc-order-id',
@@ -33,7 +31,6 @@
     qty: '.product-image__qty',
     deliveryBox: '.delivery-box',
     track: 'a[href*="/progress-tracker/package"]',
-    nextPage: 'ul.a-pagination li.a-last a, .a-pagination .a-last a',
     signIn: '#ap_email, #authportal-main-section',
   };
 
@@ -182,33 +179,12 @@
     };
   }
 
-  function nextPageUrl(doc, pageUrl, ordersOnPage) {
-    const next = doc.querySelector(SEL.nextPage);
-    if (next && !next.closest('li')?.classList.contains('a-disabled')) {
-      const href = absUrl(attr(next, 'href'), pageUrl);
-      if (href) return href;
-    }
-    // 沒有分頁連結時，用 startIndex 自行推算（滿頁才繼續）
-    if (ordersOnPage < PAGE_SIZE) return null;
-    const u = new URL(pageUrl);
-    u.searchParams.set('startIndex', String(Number(u.searchParams.get('startIndex') || 0) + PAGE_SIZE));
-    return u.href;
-  }
-
   globalThis.OrderScraper.sites.push({
     name: 'amazon',
     label: 'Amazon.co.jp',
     orderListUrl: 'https://www.amazon.co.jp/gp/css/order-history',
     isOrderPage: (loc) => /(^|\.)amazon\.co\.jp$/.test(loc.hostname) && ORDER_PAGE_RE.test(loc.pathname),
     isSignInPage: (doc, url) => /\/ap\/signin/.test(url) || !!doc.querySelector(SEL.signIn),
-    // 目前分頁就是第一頁時直接用現有 DOM，不必再發 request
-    firstPage: (loc) => {
-      const u = new URL(loc.href);
-      const useCurrent = Number(u.searchParams.get('startIndex') || 0) === 0;
-      u.searchParams.set('startIndex', '0');
-      return { url: u.href, useCurrent };
-    },
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),
-    nextPageUrl,
   });
 })();

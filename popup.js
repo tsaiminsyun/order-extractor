@@ -115,8 +115,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.phase === 'lookup') {
     setProgress(`讀取詳細資料 ${msg.done} / ${msg.total}…`);
   } else {
-    const verb = msg.phase === 'fetching' ? '讀取' : '解析';
-    setProgress(`${verb}第 ${msg.page} 頁…（已取得 ${msg.orders} 筆訂單）`);
+    setProgress(`解析頁面…（${msg.orders} 筆訂單）`);
   }
 });
 
