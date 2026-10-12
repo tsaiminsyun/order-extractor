@@ -112,5 +112,23 @@ module.exports = async function run() {
     c.eq('沒有 headers 屬性也抓得到合計（來自詳細頁）', orders[0]?.total, 5280);
   }
 
+  /* 6. 訂單列表的網址帶 ?page=N（實際網址是 /account?page=1） */
+  {
+    const onPage1 = setup(ACCOUNT, `${SHOP}/account?page=1`, { pages: pagesFor() });
+    c.eq('?page=1 仍認得站台', (await onPage1.ping()).onOrderPage, true);
+    const r1 = await onPage1.scrape();
+    c.eq('?page=1 直接用現有 DOM，不重抓列表', onPage1.asked.some((a) => /\/account(\?|$)/.test(a.url)), false);
+    c.eq('?page=1 擷取結果正常', r1.orders.map((o) => o.trackingId), ['1234567890123']);
+
+    // 停在第 3 頁時要從第 1 頁重新抓，不然前面兩頁會漏掉
+    const onPage3 = setup(ACCOUNT, `${SHOP}/account?page=3`, {
+      pages: (url) => (new URL(url).pathname === '/account' ? ACCOUNT : pagesFor()(url)),
+    });
+    await onPage3.scrape();
+    const listReq = onPage3.asked.find((a) => new URL(a.url).pathname === '/account');
+    c.eq('?page=3 會回頭從第一頁抓', listReq?.url, `${SHOP}/account`);
+  }
+
+
   return c.report();
 };

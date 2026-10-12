@@ -26,11 +26,16 @@
   const ACCOUNT_PATH_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?account(?:\/orders)?\/?$/i;
   const ORDER_PATH_RE = /\/account\/orders\//;
 
-  // 是不是 Shopify 站：看頁面特徵，不看網域
+  // 是不是 Shopify 站：看頁面特徵，不看網域。
+  // 先用選擇器（快），都沒中才掃行內 script —— 不要序列化整份 DOM
   const isShopify = (doc) =>
-    !!doc.querySelector('link[href*="cdn.shopify.com"], script[src*="cdn.shopify.com"]')
-    || !!doc.querySelector('meta[name="shopify-digital-wallet"], meta[name="shopify-checkout-api-token"]')
-    || /Shopify\.(shop|theme)\s*=/.test(doc.documentElement?.innerHTML || '');
+    !!doc.querySelector([
+      'link[href*="cdn.shopify.com"]',
+      'script[src*="cdn.shopify.com"]',
+      'meta[name="shopify-digital-wallet"]',
+      'meta[name="shopify-checkout-api-token"]',
+    ].join(','))
+    || all(doc, 'script:not([src])').some((el) => /Shopify\.(shop|theme)\s*=/.test(el.textContent));
 
   /* ---------- 訂單列表 ---------- */
 
@@ -102,7 +107,13 @@
     orderListUrl: '/account',
     isOrderPage: (loc, doc) => ACCOUNT_PATH_RE.test(loc.pathname) && isShopify(doc),
     isSignInPage: (doc, url) => /\/account\/login/.test(url) || !!doc.querySelector(SEL.signIn),
-    firstPage: (loc) => ({ url: loc.href, useCurrent: true }),
+    // 停在 ?page=1（或沒有 page 參數）才能直接用現有 DOM，否則要從第一頁重抓
+    firstPage: (loc) => {
+      const u = new URL(loc.href);
+      const useCurrent = Number(u.searchParams.get('page') || 1) === 1;
+      u.searchParams.delete('page');
+      return { url: u.href, useCurrent };
+    },
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),
     nextPageUrl,
     ORDER_PATH_RE,

@@ -1,8 +1,11 @@
 import { ordersToJson, downloadText, stamp } from './src/lib/export.js';
 
-const SITES = [
-  { label: 'Amazon.co.jp', host: 'amazon.co.jp', url: 'https://www.amazon.co.jp/gp/css/order-history' },
-  { label: '楽天市場', host: 'rakuten.co.jp', url: 'https://order.my.rakuten.co.jp/purchase-history/order-list/' },
+// 只是「快速開啟」用的捷徑。支不支援目前的分頁由 content script 回答，不看這份清單 ——
+// Shopify 商店是用頁面特徵判斷的，網域列不完
+const SHORTCUTS = [
+  { label: 'Amazon.co.jp', url: 'https://www.amazon.co.jp/gp/css/order-history' },
+  { label: '楽天市場', url: 'https://order.my.rakuten.co.jp/purchase-history/order-list/' },
+  { label: 'ちいかわマーケット', url: 'https://chiikawamarket.jp/account' },
 ];
 const CONTENT_SCRIPTS = [
   "src/content/util.js",
@@ -142,29 +145,30 @@ els.saveJson.addEventListener('click', () => {
 
 /* ---------- 初始化 ---------- */
 
+function offerShortcuts() {
+  for (const s of SHORTCUTS.slice().reverse()) {
+    const open = el('button', { className: 'open-site', text: `開啟 ${s.label} 訂單紀錄` });
+    open.addEventListener('click', () => chrome.tabs.create({ url: s.url }));
+    els.status.after(open);
+  }
+}
+
+// 一律先問 content script：支不支援目前這一頁由它決定（站台可能是用頁面特徵判斷的）
 async function checkTab() {
   const tab = await activeTab();
-  const site = SITES.find((s) => tab?.url?.includes(s.host));
-  if (!site) {
-    setStatus('請先開啟訂單紀錄頁', true);
-    for (const s of SITES.slice().reverse()) {
-      const open = el('button', { className: 'open-site', text: `開啟 ${s.label} 訂單紀錄` });
-      open.addEventListener('click', () => chrome.tabs.create({ url: s.url }));
-      els.status.after(open);
-    }
-    return;
-  }
   try {
     const pong = await ensureContentScript(tab.id);
     if (pong?.onOrderPage) {
       setStatus(`已就緒（${pong.label}）`);
       els.scrape.disabled = false;
-    } else {
-      setStatus(`目前不在 ${site.label} 的訂單紀錄頁，請切換後重試`, true);
+      return;
     }
-  } catch (err) {
-    setStatus(`無法連線到頁面：${err.message}（請重新整理分頁）`, true);
+    setStatus('目前的分頁不是支援的訂單紀錄頁', true);
+  } catch {
+    // 注入不進去（chrome:// 等頁面），或分頁需要重新整理
+    setStatus('這個分頁無法擷取，請開啟訂單紀錄頁後重試', true);
   }
+  offerShortcuts();
 }
 
 async function restoreLastResult() {
