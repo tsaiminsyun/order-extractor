@@ -20,7 +20,8 @@ Chrome 擴充功能（Manifest V3），從訂單列表頁擷取配送中的訂�
 1. 登入後開啟訂單列表頁：
    - Amazon：https://www.amazon.co.jp/gp/css/order-history
    - 楽天：https://order.my.rakuten.co.jp/purchase-history/order-list/
-   - Shopify 商店：該店的 `/account`（例如 https://chiikawamarket.jp/account）
+   - Shopify 商店：該店的 `/account`（例如 https://chiikawamarket.jp/account）。
+     多語系商店的路徑會帶語系前綴，例如 `/zh-hant/account`、`/zh-hans/account`、`/en/account`，都支援
 2. 點擴充功能圖示（popup 會顯示目前站台），按「擷取訂單」
 3. 按「下載 JSON」（檔名會帶站台，例如 `amazon-orders-20261006-0930.json`）
 
@@ -144,13 +145,14 @@ content script 依站台拆開，共用同一套流程（manifest 依序載入�
 
 | 欄位 | 錨點 |
 | --- | --- |
+| 訂單頁判斷 | 路徑是 `/account`，可帶語系前綴（`/zh-hant/account`、`/zh-hans/account`…）。前綴不一定是兩個字母 |
 | 訂單範圍 / 注文番号 | `a[href*="/account/orders/"]`（任何佈景主題都有），往上爬到 `<tr>` |
 | 合計（列表頁） | `td[headers~="ColumnTotal"]`；沒有該屬性時退回該列最後一個含金額的欄位 |
 | 合計（詳細頁，優先） | `td[headers~="RowTotal"]`，避開小計 / 送料 / 稅 |
 | 品名 | 詳細頁 `td[headers~="ColumnProduct"]` 裡的 `a[href*="/products/"]`；商品下架時退回該格文字 |
 | 数量 | 詳細頁 `td[headers~="ColumnQuantity"]` |
 | 配送業者 / 追蹤番号 | 詳細頁的 `.fulfillment` 區塊，格式是 `{{ tracking_company }} #{{ tracking_number }}`。`#` 是樣板寫死的字元，不是翻譯，可直接當分隔符 |
-| 画像 | 訂單頁**沒有商品圖**。改用 `/products/{handle}.js` 取 `featured_image`，同一件商品只問一次 |
+| 画像 | 訂單頁**沒有商品圖**。改用商品連結自己的路徑加上 `.js`（`/zh-hant/products/xxx.js`）取 `featured_image`，保留語系前綴避免轉址。同一件商品只問一次，沒有追蹤號的商品不問 |
 
 訂單列表只有注文番号 / 日期 / 狀態 / 合計，所以**目前這一頁上的每筆訂單都要讀一次詳細頁**。
 那些頁面是伺服器渲染的，用 `fetch` 就夠，不必開 iframe。

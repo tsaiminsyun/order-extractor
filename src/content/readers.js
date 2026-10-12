@@ -186,31 +186,37 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     return { carrier: '', trackingId: '' };
   }
 
-  // 商品網址 /products/{handle} → /products/{handle}.js 可取得商品 JSON（含主圖）。
-  // 訂單頁本身沒有商品圖，只能另外要
-  const productHandle = (href) => String(href || '').match(/\/products\/([^/?#]+)/)?.[1] || '';
+  // 商品網址 /products/{handle} → 加上 .js 就是商品 JSON（含主圖）。
+  // 訂單頁本身沒有商品圖，只能另外要。
+  // 直接沿用連結自己的路徑，多語系商店的語系前綴（/zh-hant/products/…）才不會掉
+  const productPath = (href, base) => {
+    try {
+      const { pathname } = new URL(href, base);
+      return /\/products\/[^/]+$/.test(pathname) ? pathname : '';
+    } catch { return ''; }
+  };
 
   // 同一件商品常出現在多筆訂單裡，問過的就記著（存的是 Promise，同時發問也只會送出一次）
   const productImageCache = new Map();
 
-  function shopifyImage(handle, base) {
-    if (!productImageCache.has(handle)) {
-      productImageCache.set(handle, (async () => {
+  function shopifyImage(path, base) {
+    if (!productImageCache.has(path)) {
+      productImageCache.set(path, (async () => {
         try {
-          const res = await fetch(new URL(`/products/${handle}.js`, base).href, { credentials: 'include' });
+          const res = await fetch(new URL(`${path}.js`, base).href, { credentials: 'include' });
           if (!res.ok) return null;
           const src = (await res.json()).featured_image;
           return src ? (src.startsWith('//') ? `https:${src}` : src) : null;
         } catch { return null; } // 取不到圖就留空，不影響其他欄位
       })());
     }
-    return productImageCache.get(handle);
+    return productImageCache.get(path);
   }
 
-  async function shopifyImages(handles, base) {
-    const unique = [...new Set(handles)].filter(Boolean);
-    const urls = await Promise.all(unique.map((h) => shopifyImage(h, base)));
-    return new Map(unique.map((h, i) => [h, urls[i]]).filter(([, u]) => u));
+  async function shopifyImages(paths, base) {
+    const unique = [...new Set(paths)].filter(Boolean);
+    const urls = await Promise.all(unique.map((p) => shopifyImage(p, base)));
+    return new Map(unique.map((p, i) => [p, urls[i]]).filter(([, u]) => u));
   }
 
   function shopifyItems(doc) {
@@ -223,7 +229,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
       return {
         title,
         quantity: Number(clean(qtyCell?.textContent).replace(/[^\d]/g, '')) || 1,
-        handle: productHandle(attr(link, 'href')),
+        path: productPath(attr(link, 'href'), doc.baseURI || location.href),
         imageUrl: null,
         ...shopifyShipment(row),
       };
@@ -238,8 +244,10 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
   globalThis.OrderScraper.readers.shopifyOrder = async (doc) => {
     if (doc.querySelector('form[action*="/account/login"]')) return { signIn: true };
     const items = shopifyItems(doc);
-    const images = await shopifyImages(items.map((i) => i.handle), doc.baseURI || location.href);
-    for (const item of items) item.imageUrl = images.get(item.handle) || null;
+    // 沒有追蹤號的商品不會輸出，就別為它多要一次商品 JSON
+    const shipping = items.filter((i) => i.trackingId);
+    const images = await shopifyImages(shipping.map((i) => i.path), doc.baseURI || location.href);
+    for (const item of shipping) item.imageUrl = images.get(item.path) || null;
     return { ok: true, total: shopifyTotal(doc), items };
   };
 

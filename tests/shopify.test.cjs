@@ -26,8 +26,11 @@ const IMAGES = {
 // #1001 已出貨；#1002 在列表頁是「未発送」，詳細頁沒有 .fulfillment 區塊
 const UNFULFILLED = (html) => html.replace(/<div class="fulfillment">[\s\S]*?<\/div>\s*<\/div>/g, '</div>');
 
+// 多語系商店的路徑會帶語系前綴（/zh-hant/account/orders/…），這裡一併處理
+const stripLocale = (pathname) => pathname.replace(/^\/[a-z]{2,3}(?:-[a-z0-9]{2,8})*(?=\/)/i, '');
+
 const pagesFor = (orderHtml = ORDER) => (url) => {
-  const { pathname } = new URL(url);
+  const pathname = stripLocale(new URL(url).pathname);
   if (pathname.startsWith('/account/orders/')) {
     return pathname.includes('f6g7h8i9j0') ? UNFULFILLED(orderHtml) : orderHtml;
   }
@@ -75,6 +78,7 @@ module.exports = async function run() {
     // 同一件商品在多筆訂單出現時，商品 JSON 只要一次
     const imgReqs = asked.filter((a) => /\/products\/.+\.js$/.test(a.url));
     c.eq('每個商品只問一次圖', imgReqs.length, new Set(imgReqs.map((r) => r.url)).size);
+    c.eq('沒有追蹤號的商品不浪費一次請求', imgReqs.some((r) => /usagi/.test(r.url)), false);
   }
 
   /* 3. 詳細頁讀不到時：訂單仍保留列表頁的合計，但沒有包裹就不輸出 */
@@ -123,6 +127,35 @@ module.exports = async function run() {
       const listReq = s.asked.filter((a) => new URL(a.url).pathname === '/account');
       c.eq(`${page || '沒有 page 參數'} 不會再去抓訂單列表`, listReq, []);
     }
+  }
+
+
+  /* 7. 多語系商店：路徑帶語系前綴（/zh-hant/account、/zh-hans/account、/en/account） */
+  {
+    for (const locale of ['zh-hant', 'zh-hans', 'en']) {
+      const base = `${SHOP}/${locale}`;
+      // 訂單連結與商品連結在多語系商店也會帶前綴
+      const localised = ACCOUNT.replace(/href="\/account\/orders\//g, `href="/${locale}/account/orders/`);
+      const order = ORDER.replace(/href="\/products\//g, `href="/${locale}/products/`);
+
+      const s = setup(localised, `${base}/account?page=1`, { pages: pagesFor(order) });
+      c.eq(`/${locale}/account 認得出站台`, (await s.ping()).site, 'shopify');
+
+      const { orders } = await s.scrape();
+      c.eq(`/${locale} 擷取結果正常`, [orders.length, orders[0]?.trackingId, orders[0]?.total],
+        [1, '1234567890123', 5280]);
+      c.eq(`/${locale} 数量`, orders[0]?.items.map((i) => i.quantity), [2, 1]);
+
+      // 商品 JSON 要沿用語系前綴，不要掉回根路徑（否則會多一次轉址）
+      const imgReqs = s.asked.filter((a) => a.url.endsWith('.js'));
+      c.eq(`/${locale} 商品 JSON 保留語系前綴`, imgReqs.map((r) => new URL(r.url).pathname),
+        [`/${locale}/products/chiikawa-plush.js`, `/${locale}/products/hachiware-keychain.js`]);
+      c.eq(`/${locale} 仍取得商品圖`, orders[0]?.items.every((i) => i.imageUrl?.startsWith('https://cdn.shopify.com')), true);
+    }
+
+    // 不是語系前綴的路徑不該被當成訂單頁
+    const notAccount = setup(ACCOUNT, `${SHOP}/shop/account`);
+    c.eq('/shop/account 不是訂單頁', (await notAccount.ping()).onOrderPage, false);
   }
 
 

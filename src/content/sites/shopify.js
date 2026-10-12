@@ -22,8 +22,10 @@
     signIn: 'form[action*="/account/login"]',
   };
 
-  // 訂單列表可能帶 ?page=N，那是查詢字串不影響 pathname
-  const ACCOUNT_PATH_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?account(?:\/orders)?\/?$/i;
+  /* 多語系商店的路徑會帶語系前綴：/zh-hant/account、/zh-hans/account、/en/account。
+   * 前綴是 Shopify 的「語系網址代碼」，不一定是兩個字母（zh-hant 就不是），
+   * 所以不能寫死成 [a-z]{2}。?page=N 是查詢字串，不影響 pathname。 */
+  const ACCOUNT_PATH_RE = /^\/(?:[a-z]{2,3}(?:-[a-z0-9]{2,8})*\/)?account(?:\/orders)?\/?$/i;
 
   // 是不是 Shopify 站：看頁面特徵，不看網域。
   // 先用選擇器（快），都沒中才掃行內 script —— 不要序列化整份 DOM

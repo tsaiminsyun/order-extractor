@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "訂單擷取（Amazon.co.jp / 楽天）",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "擷取 Amazon.co.jp 與 楽天市場 的訂單內容，並匯出 JSON",
   "action": {
     "default_popup": "popup.html",
@@ -34,7 +34,8 @@
         "https://www.amazon.co.jp/your-orders/*",
         "https://www.amazon.co.jp/gp/your-account/order-history*",
         "https://order.my.rakuten.co.jp/purchase-history/*",
-        "https://chiikawamarket.jp/account*"
+        "https://chiikawamarket.jp/account*",
+        "https://chiikawamarket.jp/*/account*"
       ],
       "js": [
         "src/content/util.js",
