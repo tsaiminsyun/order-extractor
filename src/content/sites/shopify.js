@@ -57,10 +57,15 @@
     return cards;
   }
 
-  // 合計：Dawn 標了 headers="… ColumnTotal"；其他主題退回該列最後一個含金額的欄位
-  const orderTotal = (card) =>
-    parseMoney(textOf(card.querySelector(SEL.total)))
-    ?? parseMoney(textOf(all(card, 'td, div').reverse().find((el) => parseMoney(textOf(el)))));
+  // 合計：Dawn 標了 headers="… ColumnTotal"；其他主題退回該列最後一個含金額的欄位。
+  // 退回時一定要有幣別標記 —— 不然日期欄的「2024年12月28日」會被當成金額 2024
+  const MONEY_TEXT_RE = /[¥￥]|JPY|円/i;
+  const orderTotal = (card) => {
+    const labelled = parseMoney(textOf(card.querySelector(SEL.total)));
+    if (labelled != null) return labelled;
+    const cell = all(card, 'td, div').reverse().find((el) => MONEY_TEXT_RE.test(textOf(el)) && parseMoney(textOf(el)) != null);
+    return parseMoney(textOf(cell));
+  };
 
   /* ---------- 組合 ---------- */
 

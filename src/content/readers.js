@@ -158,36 +158,69 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
   /* ---------- Shopify：注文詳細頁（/account/orders/…） ---------- */
 
-  /* Shopify 的訂單頁是伺服器渲染的 Liquid，不必等前端跑完。
-   * Dawn 樣板用 id / headers 屬性標示欄位（ColumnQuantity、RowTotal…），
-   * 這些屬性**不會被翻譯**，所以多語系不必比對字樣。
-   * 其他佈景主題可能改過版面，所以每個欄位都再退一層結構判斷。 */
+  /* Shopify 的訂單頁是伺服器渲染的，不必等前端跑完。
+   * 但各店的佈景主題差很多（實際看過兩種：Dawn 原版、以及完全重寫的版本），
+   * 所以不靠固定的表格選擇器，改以**配送資訊**為錨點：
+   * 樣板一律輸出「{{ tracking_company }} #{{ tracking_number }}」，
+   * 那個「#」是寫死的字元不是翻譯，可以直接當錨點，再往上找出它所屬的那一列。 */
 
-  const SHOPIFY = {
-    itemRow: 'table.order-details tbody tr',
-    product: 'td[headers~="ColumnProduct"]',
-    quantity: 'td[headers~="ColumnQuantity"]',
-    orderTotal: 'td[headers~="RowTotal"]',
-    fulfillment: '.fulfillment',
-    productLink: 'a[href*="/products/"]',
+  const TRACKING_RE = /^(.+?)\s*#\s*([A-Za-z0-9][A-Za-z0-9-]{3,})$/;
+  const QTY_CELL = 'td[headers~="ColumnQuantity"], td[class*="qty"], [class*="quantity"]';
+  const PRODUCT_LINK = 'a[href*="/products/"]';
+  const LEAF = 'span, a, p, div, td, li';
+
+  // Shopify CDN 的縮圖會在副檔名前加尺寸（…_100x.jpg），去掉取原圖
+  const fullSize = (src) => {
+    if (!src) return null;
+    const url = src.startsWith('//') ? `https:${src}` : src;
+    return url.replace(/_(?:\d+x\d*|\d*x\d+)(?=\.[a-z]+(?:\?|$))/i, '');
   };
 
-  // 出貨資訊長這樣：<span>{{ tracking_company }} #{{ tracking_number }}</span>
-  // 「#」是樣板寫死的字元，不是翻譯，所以可以直接當分隔符
-  const TRACKING_RE = /^(.*?)\s*#\s*([A-Za-z0-9][A-Za-z0-9-]{3,})\s*$/;
+  // 文字剛好是「業者名 #伝票番号」的最內層元素。Dawn 放在 <span>，有的主題放在追蹤連結的 <a> 裡
+  const trackingNodes = (doc) =>
+    all(doc, LEAF)
+      .filter((el) => !el.querySelector(LEAF))
+      .map((el) => ({ el, found: TRACKING_RE.exec(clean(el.textContent)) }))
+      .filter(({ found }) => found);
 
-  function shopifyShipment(row) {
-    const box = row.querySelector(SHOPIFY.fulfillment);
-    if (!box) return { carrier: '', trackingId: '' };
-    for (const el of all(box, 'span')) {
-      const m = TRACKING_RE.exec(clean(el.textContent));
-      if (m) return { carrier: clean(m[1]), trackingId: m[2] };
+  const rowOf = (el) => el.closest('tr') || el.closest('li') || el.parentElement;
+
+  // 品名：商品連結 → 標題元素 →（都沒有就放棄這一列）
+  const titleIn = (row) =>
+    clean(row.querySelector(PRODUCT_LINK)?.textContent)
+    || clean(row.querySelector('h1, h2, h3, h4, h5')?.textContent);
+
+  // 数量：Dawn 標了 headers；其他主題常用 class。都認不得時找「整格只有數字」的欄位
+  function quantityIn(row) {
+    const cell = row.querySelector(QTY_CELL)
+      || all(row, 'td').find((td) => /^\d{1,4}$/.test(clean(td.textContent)));
+    return Number(clean(cell?.textContent).replace(/[^\d]/g, '')) || 1;
+  }
+
+  function shopifyItems(doc, base) {
+    const items = [];
+    const seen = new Set();
+    for (const { el, found } of trackingNodes(doc)) {
+      const row = rowOf(el);
+      if (!row || seen.has(row)) continue;
+      seen.add(row);
+      const title = titleIn(row);
+      if (!title) continue;
+      const link = row.querySelector(PRODUCT_LINK);
+      items.push({
+        title,
+        quantity: quantityIn(row),
+        carrier: clean(found[1]),
+        trackingId: found[2],
+        // 有的主題訂單頁就有商品圖；沒有的話只能靠商品連結另外要（見 shopifyImages）
+        imageUrl: fullSize(attr(row.querySelector('img'), 'src')) || null,
+        path: productPath(attr(link, 'href'), base),
+      });
     }
-    return { carrier: '', trackingId: '' };
+    return items;
   }
 
   // 商品網址 /products/{handle} → 加上 .js 就是商品 JSON（含主圖）。
-  // 訂單頁本身沒有商品圖，只能另外要。
   // 直接沿用連結自己的路徑，多語系商店的語系前綴（/zh-hant/products/…）才不會掉
   const productPath = (href, base) => {
     try {
@@ -205,50 +238,32 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
         try {
           const res = await fetch(new URL(`${path}.js`, base).href, { credentials: 'include' });
           if (!res.ok) return null;
-          const src = (await res.json()).featured_image;
-          return src ? (src.startsWith('//') ? `https:${src}` : src) : null;
+          return fullSize((await res.json()).featured_image);
         } catch { return null; } // 取不到圖就留空，不影響其他欄位
       })());
     }
     return productImageCache.get(path);
   }
 
-  async function shopifyImages(paths, base) {
-    const unique = [...new Set(paths)].filter(Boolean);
-    const urls = await Promise.all(unique.map((p) => shopifyImage(p, base)));
-    return new Map(unique.map((p, i) => [p, urls[i]]).filter(([, u]) => u));
+  // 只替「訂單頁上沒有圖、但有商品連結」的商品發問
+  async function shopifyImages(items, base) {
+    const paths = [...new Set(items.filter((i) => !i.imageUrl && i.path).map((i) => i.path))];
+    const urls = await Promise.all(paths.map((p) => shopifyImage(p, base)));
+    const byPath = new Map(paths.map((p, i) => [p, urls[i]]));
+    for (const item of items) item.imageUrl ||= byPath.get(item.path) || null;
   }
 
-  function shopifyItems(doc) {
-    return all(doc, SHOPIFY.itemRow).map((row) => {
-      const cell = row.querySelector(SHOPIFY.product) || row.cells?.[0];
-      const link = cell?.querySelector(SHOPIFY.productLink);
-      // 品名在連結裡；沒有連結（商品已下架）時退回該格第一段文字
-      const title = clean(link?.textContent) || clean(cell?.querySelector('p, span')?.textContent);
-      const qtyCell = row.querySelector(SHOPIFY.quantity) || row.cells?.[3];
-      return {
-        title,
-        quantity: Number(clean(qtyCell?.textContent).replace(/[^\d]/g, '')) || 1,
-        path: productPath(attr(link, 'href'), doc.baseURI || location.href),
-        imageUrl: null,
-        ...shopifyShipment(row),
-      };
-    }).filter((i) => i.title);
-  }
-
-  // 合計取表尾的 RowTotal（總計），避開小計 / 送料 / 稅
+  // 合計：Dawn 的表尾標了 RowTotal；其他主題常用 class 標總計那一列。都避開小計 / 送料 / 稅
   const shopifyTotal = (doc) =>
-    parseMoney(clean(doc.querySelector(SHOPIFY.orderTotal)?.textContent))
+    parseMoney(clean(doc.querySelector('td[headers~="RowTotal"]')?.textContent))
+    ?? parseMoney(clean(doc.querySelector('[class*="order_total"], [class*="order-total"]')?.textContent))
     ?? parseMoney(clean(all(doc, 'tfoot td').at(-1)?.textContent));
 
   globalThis.OrderScraper.readers.shopifyOrder = async (doc) => {
     if (doc.querySelector('form[action*="/account/login"]')) return { signIn: true };
-    const items = shopifyItems(doc);
-    // 沒有追蹤號的商品不會輸出，就別為它多要一次商品 JSON
-    const shipping = items.filter((i) => i.trackingId);
-    const images = await shopifyImages(shipping.map((i) => i.path), doc.baseURI || location.href);
-    for (const item of shipping) item.imageUrl = images.get(item.path) || null;
+    const base = doc.baseURI || location.href;
+    const items = shopifyItems(doc, base);
+    await shopifyImages(items, base);
     return { ok: true, total: shopifyTotal(doc), items };
   };
-
 })();

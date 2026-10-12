@@ -1,163 +1,147 @@
-/* Shopify 商店的訂單歷史
+/* Shopify 商店的訂單歷史：以兩家店的**實際頁面**為測試資料
  *
- * fixture 依 Dawn 15.2.0 的 sections/main-account.liquid 與 main-order.liquid
- * 的輸出結構產生（不是實際擷取的頁面），所以結構正確但仍需用真實頁面校正。
+ * shopify-dawn-*    ちいかわマーケット：Dawn 原版結構（id / headers 屬性標示欄位），
+ *                   合計寫成「5,940.00JPY」，列表多一欄ノベルティ
+ * shopify-custom-*  jypj-store：大幅客製的佈景主題 —— 沒有 headers 屬性、
+ *                   沒有商品連結（但列表上就有商品圖）、追蹤號在 <a> 裡、
+ *                   合計在 <dl> 不在表格裡、列表頁根本沒有合計欄
  *
- * 重點：Dawn 用 id / headers 屬性標示欄位（ColumnQuantity、RowTotal…），
- * 這些屬性不會被翻譯，所以同一套解析吃得下所有語系 —— 第 4 項驗證這件事。
+ * 兩者結構差很多，所以解析不靠固定的表格選擇器，而是以配送資訊的
+ * 「業者名 #伝票番号」為錨點往上找所屬的那一列。
  */
 const fs = require('fs');
 const path = require('path');
 const { setup, Check } = require('./harness.cjs');
 
-const SHOP = 'https://chiikawamarket.jp';
-const URL_LIST = `${SHOP}/account`;
-const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
-const ACCOUNT = fixture('shopify-account-ja.html');
-const ORDER = fixture('shopify-order-ja.html');
+const fixture = (n) => fs.readFileSync(path.join(__dirname, 'fixtures', n), 'utf8');
+const page = (body) => `<html><head><script>Shopify.theme = {"schema_name":"Dawn"};</script></head><body>${body}</body></html>`;
 
-// 商品 JSON（/products/{handle}.js）：訂單頁沒有商品圖，只能另外要
-const IMAGES = {
-  'chiikawa-plush': '//cdn.shopify.com/s/files/1/0626/plush.jpg?v=1',
-  'hachiware-keychain': '//cdn.shopify.com/s/files/1/0626/keychain.jpg?v=2',
-  'usagi-mascot': '//cdn.shopify.com/s/files/1/0626/usagi.jpg?v=3',
-};
+const DAWN = { shop: 'https://chiikawamarket.jp', list: fixture('shopify-dawn-list-ja.html'), order: fixture('shopify-dawn-order-ja.html') };
+const CUSTOM = { shop: 'https://jypj-store.com', list: fixture('shopify-custom-list-ja.html'), order: fixture('shopify-custom-order-ja.html') };
 
-// #1001 已出貨；#1002 在列表頁是「未発送」，詳細頁沒有 .fulfillment 區塊
-const UNFULFILLED = (html) => html.replace(/<div class="fulfillment">[\s\S]*?<\/div>\s*<\/div>/g, '</div>');
+// 詳細頁 fixture 對應的那一筆訂單；其他訂單一律當成「還沒出貨」
+const DAWN_TOKEN = 'a5aa27b3e87290fe94801401095805aa';   // CHIIKAWA-4099569（詳細頁 fixture 就是這一筆）
+const CUSTOM_TOKEN = '085e737a69857d9e7ca5a25cfaff4add'; // #1501755
+const noTracking = (html) => html.replace(/#\s*\d{6,}/g, '');
 
-// 多語系商店的路徑會帶語系前綴（/zh-hant/account/orders/…），這裡一併處理
-const stripLocale = (pathname) => pathname.replace(/^\/[a-z]{2,3}(?:-[a-z0-9]{2,8})*(?=\/)/i, '');
-
-const pagesFor = (orderHtml = ORDER) => (url) => {
-  const pathname = stripLocale(new URL(url).pathname);
-  if (pathname.startsWith('/account/orders/')) {
-    return pathname.includes('f6g7h8i9j0') ? UNFULFILLED(orderHtml) : orderHtml;
+const serve = ({ order }, token, images = {}) => (url) => {
+  const { pathname } = new URL(url);
+  if (pathname.includes('/account/orders/')) {
+    return pathname.includes(token) ? order : noTracking(order);
   }
-  const handle = pathname.match(/^\/products\/(.+)\.js$/)?.[1];
-  if (handle && IMAGES[handle]) return JSON.stringify({ title: handle, featured_image: IMAGES[handle] });
-  return null;
+  const key = pathname.replace(/\.js$/, '');
+  return images[key] ? JSON.stringify({ featured_image: images[key] }) : null;
 };
 
 module.exports = async function run() {
-  const c = new Check('Shopify 商店');
+  const c = new Check('Shopify 商店（實際 HTML）');
 
-  /* 1. 站台判斷：看頁面特徵，不看網域（所以新增一家店不必改程式） */
+  /* 1. 站台判斷：看頁面特徵，不看網域 */
   {
-    const { ping } = setup(ACCOUNT, URL_LIST, { pages: pagesFor() });
-    const pong = await ping();
-    c.eq('PING 站台', [pong.onOrderPage, pong.site, pong.label], [true, 'shopify', 'Shopify 商店']);
-
-    // 換一個完全不同的網域，照樣認得出來
-    const other = setup(ACCOUNT, 'https://nagano-market.jp/account', { pages: pagesFor() });
-    c.eq('別家 Shopify 店也認得', (await other.ping()).site, 'shopify');
-
-    // 沒有 Shopify 特徵的 /account 不該被當成這個站台
-    const notShopify = setup(ACCOUNT.replace(/cdn\.shopify\.com/g, 'example.com'), 'https://example.com/account');
-    c.eq('不是 Shopify 的 /account 不處理', (await notShopify.ping()).onOrderPage, false);
-  }
-
-  /* 2. 擷取：一個追蹤號一筆，沒有追蹤號的商品不輸出 */
-  {
-    const { scrape, asked } = setup(ACCOUNT, URL_LIST, { pages: pagesFor() });
-    const { orders, site } = await scrape();
-    c.eq('站台', site, 'shopify');
-    c.eq('一個伝票番号一筆', orders.length, 1);
-    c.eq('注文番号（去掉 #）', orders[0]?.orderId, '1001');
-    c.eq('合計取 RowTotal（不是小計）', orders[0]?.total, 5280);
-    c.eq('配送業者 / 追蹤番号', [orders[0]?.carrier, orders[0]?.trackingId], ['日本郵便', '1234567890123']);
-    c.eq('同一個追蹤號的商品歸成一筆', orders[0]?.items.map((i) => i.title), ['ちいかわ ぬいぐるみ', 'ハチワレ キーホルダー']);
-    c.eq('数量', orders[0]?.items.map((i) => i.quantity), [2, 1]);
-    c.eq('未出貨的商品不輸出', orders[0]?.items.some((i) => /うさぎ/.test(i.title)), false);
-    c.eq('商品圖（來自 /products/{handle}.js）', orders[0]?.items.map((i) => i.imageUrl),
-      ['https://cdn.shopify.com/s/files/1/0626/plush.jpg?v=1', 'https://cdn.shopify.com/s/files/1/0626/keychain.jpg?v=2']);
-
-    const detail = asked.filter((a) => a.url.includes('/account/orders/'));
-    c.eq('兩筆訂單各讀一次詳細頁', detail.length, 2);
-    c.eq('沒有商品的訂單不出現在結果裡', orders.map((o) => o.orderId), ['1001']);
-    // 同一件商品在多筆訂單出現時，商品 JSON 只要一次
-    const imgReqs = asked.filter((a) => /\/products\/.+\.js$/.test(a.url));
-    c.eq('每個商品只問一次圖', imgReqs.length, new Set(imgReqs.map((r) => r.url)).size);
-    c.eq('沒有追蹤號的商品不浪費一次請求', imgReqs.some((r) => /usagi/.test(r.url)), false);
-  }
-
-  /* 3. 詳細頁讀不到時：訂單仍保留列表頁的合計，但沒有包裹就不輸出 */
-  {
-    const { scrape } = setup(ACCOUNT, URL_LIST, { pages: () => null });
-    const { orders } = await scrape();
-    c.eq('詳細頁全部讀不到 → 沒有可輸出的包裹', orders.length, 0);
-  }
-
-  /* 4. 多語系：Dawn 的 id / headers 不會被翻譯，只換文字結果要完全一樣 */
-  {
-    const translate = (html) => html
-      .replace(/注文履歴/g, 'Order history').replace(/アカウント/g, 'Account')
-      .replace(/支払い状況/g, 'Payment status').replace(/フルフィルメントステータス/g, 'Fulfillment status')
-      .replace(/日付/g, 'Date').replace(/合計/g, 'Total').replace(/小計/g, 'Subtotal')
-      .replace(/配送状況を確認する/g, 'Track shipment').replace(/に発送されました/g, ' fulfilled')
-      .replace(/数量/g, 'Quantity').replace(/価格/g, 'Price').replace(/商品/g, 'Product')
-      .replace(/支払い済み/g, 'Paid').replace(/発送済み/g, 'Fulfilled').replace(/未発送/g, 'Unfulfilled')
-      .replace(/配送/g, 'Shipping').replace(/注文/g, 'Order').replace(/lang="ja"/, 'lang="en"');
-
-    const ja = await setup(ACCOUNT, URL_LIST, { pages: pagesFor() }).scrape();
-    const en = await setup(translate(ACCOUNT), URL_LIST, { pages: pagesFor(translate(ORDER)) }).scrape();
-    c.eq('換語系後結果完全相同', en.orders, ja.orders);
-  }
-
-  /* 5. 其他佈景主題：沒有 Dawn 的 headers 屬性時，仍要靠結構找到訂單與合計 */
-  {
-    const plain = ACCOUNT
-      .replace(/ headers="[^"]*"/g, '')
-      .replace(/ id="Column[^"]*"/g, '')
-      .replace(/class="order-history"/, 'class="my-orders"');
-    const { scrape } = setup(plain, URL_LIST, { pages: pagesFor() });
-    const { orders } = await scrape();
-    c.eq('沒有 headers 屬性也找得到訂單', orders.length, 1);
-    c.eq('沒有 headers 屬性也抓得到合計（來自詳細頁）', orders[0]?.total, 5280);
-  }
-
-  /* 6. 訂單列表的網址帶 ?page=N（實際網址是 /account?page=1）。
-   *    只擷取使用者眼前這一頁 —— 不論停在第幾頁，都不會自己去抓別頁 */
-  {
-    for (const page of ['?page=1', '?page=3', '']) {
-      const s = setup(ACCOUNT, `${SHOP}/account${page}`, { pages: pagesFor() });
-      c.eq(`${page || '沒有 page 參數'} 仍認得站台`, (await s.ping()).onOrderPage, true);
-      const r = await s.scrape();
-      c.eq(`${page || '沒有 page 參數'} 擷取結果正常`, r.orders.map((o) => o.trackingId), ['1234567890123']);
-      const listReq = s.asked.filter((a) => new URL(a.url).pathname === '/account');
-      c.eq(`${page || '沒有 page 參數'} 不會再去抓訂單列表`, listReq, []);
+    for (const { shop, list } of [DAWN, CUSTOM]) {
+      const { ping } = setup(page(list), `${shop}/account?page=1`, { pages: () => null });
+      c.eq(`${new URL(shop).hostname} 認得出站台`, (await ping()).site, 'shopify');
     }
-  }
-
-
-  /* 7. 多語系商店：路徑帶語系前綴（/zh-hant/account、/zh-hans/account、/en/account） */
-  {
+    // 多語系商店的語系前綴
     for (const locale of ['zh-hant', 'zh-hans', 'en']) {
-      const base = `${SHOP}/${locale}`;
-      // 訂單連結與商品連結在多語系商店也會帶前綴
-      const localised = ACCOUNT.replace(/href="\/account\/orders\//g, `href="/${locale}/account/orders/`);
-      const order = ORDER.replace(/href="\/products\//g, `href="/${locale}/products/`);
-
-      const s = setup(localised, `${base}/account?page=1`, { pages: pagesFor(order) });
-      c.eq(`/${locale}/account 認得出站台`, (await s.ping()).site, 'shopify');
-
-      const { orders } = await s.scrape();
-      c.eq(`/${locale} 擷取結果正常`, [orders.length, orders[0]?.trackingId, orders[0]?.total],
-        [1, '1234567890123', 5280]);
-      c.eq(`/${locale} 数量`, orders[0]?.items.map((i) => i.quantity), [2, 1]);
-
-      // 商品 JSON 要沿用語系前綴，不要掉回根路徑（否則會多一次轉址）
-      const imgReqs = s.asked.filter((a) => a.url.endsWith('.js'));
-      c.eq(`/${locale} 商品 JSON 保留語系前綴`, imgReqs.map((r) => new URL(r.url).pathname),
-        [`/${locale}/products/chiikawa-plush.js`, `/${locale}/products/hachiware-keychain.js`]);
-      c.eq(`/${locale} 仍取得商品圖`, orders[0]?.items.every((i) => i.imageUrl?.startsWith('https://cdn.shopify.com')), true);
+      const { ping } = setup(page(DAWN.list), `${DAWN.shop}/${locale}/account?page=1`, { pages: () => null });
+      c.eq(`/${locale}/account 認得出站台`, (await ping()).onOrderPage, true);
     }
-
-    // 不是語系前綴的路徑不該被當成訂單頁
-    const notAccount = setup(ACCOUNT, `${SHOP}/shop/account`);
+    const notShopify = setup(`<html><body>${DAWN.list}</body></html>`, 'https://example.com/account');
+    c.eq('沒有 Shopify 特徵的 /account 不處理', (await notShopify.ping()).onOrderPage, false);
+    const notAccount = setup(page(DAWN.list), `${DAWN.shop}/shop/account`);
     c.eq('/shop/account 不是訂單頁', (await notAccount.ping()).onOrderPage, false);
   }
 
+  /* 2. Dawn 原版（ちいかわマーケット） */
+  {
+    const images = { '/products/4571609404910': '//cdn.shopify.com/s/files/sticker_100x.jpg' };
+    const { scrape, asked } = setup(page(DAWN.list), `${DAWN.shop}/account?page=1`, { pages: serve(DAWN, DAWN_TOKEN, images) });
+    const { orders } = await scrape();
+
+    c.eq('只輸出有追蹤號的那筆', orders.map((o) => o.orderId), ['CHIIKAWA-4099569']);
+    c.eq('合計（詳細頁的 RowTotal，避開小計 / 送料 / 稅）', orders[0]?.total, 3410);
+    c.eq('配送業者 / 伝票番号', [orders[0]?.carrier, orders[0]?.trackingId], ['Yamato (JA)', '510965337234']);
+    c.eq('三件商品同一個伝票番号 → 歸成一筆', orders[0]?.items.length, 3);
+    c.eq('品名', orders[0]?.items[0]?.title, 'ちいかわ 映画ちいかわ 大きめステッカー（ちいかわと島二郎）');
+    c.eq('数量', orders[0]?.items.map((i) => i.quantity), [1, 1, 1]);
+    c.eq('訂單頁沒有商品圖 → 另外要商品 JSON（去掉尺寸後綴）',
+      orders[0]?.items[0]?.imageUrl, 'https://cdn.shopify.com/s/files/sticker.jpg');
+    c.eq('列表上 10 筆訂單都各讀一次詳細頁', asked.filter((a) => a.url.includes('/account/orders/')).length, 10);
+    c.eq('商品連結帶 ?variant= 也取得到路徑',
+      asked.some((a) => a.url.endsWith('/products/4571609404910.js')), true);
+  }
+
+  /* 3. Dawn：列表頁自己的合計欄（寫成 5,940.00JPY，沒有幣別符號） */
+  {
+    const { scrape } = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: () => null });
+    const { orders } = await scrape({ withLookups: false });
+    c.eq('詳細頁還沒讀時列表頁的合計', orders.length, 0); // 沒有包裹就不輸出
+    // 直接驗轉接層讀到的列表頁合計
+    const site = globalThis.OrderScraper.sites.find((s) => s.name === 'shopify');
+    const totals = site.findOrders(globalThis.document, `${DAWN.shop}/account`).map((o) => o.total);
+    c.eq('列表頁合計（5,940.00JPY → 5940）', totals.slice(0, 3), [5940, 4620, 2090]);
+  }
+
+  /* 4. 客製佈景主題（jypj-store）：結構完全不同，輸出格式要一樣 */
+  {
+    const { scrape, asked } = setup(page(CUSTOM.list), `${CUSTOM.shop}/account`, { pages: serve(CUSTOM, CUSTOM_TOKEN) });
+    const { orders } = await scrape();
+
+    c.eq('只輸出有追蹤號的那筆', orders.map((o) => o.orderId), ['1501755']);
+    c.eq('合計（<dl class="order_total">，不是表格）', orders[0]?.total, 7400);
+    c.eq('配送業者 / 伝票番号（在 <a> 裡）', [orders[0]?.carrier, orders[0]?.trackingId], ['Sagawa (JA)', '364694555713']);
+    c.eq('兩件商品同一個伝票番号', orders[0]?.items.length, 2);
+    c.eq('品名取自 <h4>（沒有商品連結）', orders[0]?.items[0]?.title.startsWith('SMARTPHONE HOLDER'), true);
+    c.eq('数量取自 td.qty', orders[0]?.items.map((i) => i.quantity), [1, 1]);
+    c.eq('商品圖直接用列表上的 img（去掉 _100x 尺寸）',
+      orders[0]?.items[0]?.imageUrl, 'https://jypj-store.com/cdn/shop/files/sk24-ate-0087-01.jpg?v=1734425232');
+    c.eq('已經有圖就不問商品 JSON', asked.some((a) => a.url.endsWith('.js')), false);
+  }
+
+  /* 5. 列表頁沒有合計欄時不可把日期當成金額 */
+  {
+    const { scrape } = setup(page(CUSTOM.list), `${CUSTOM.shop}/account`, { pages: () => null });
+    await scrape({ withLookups: false });
+    const site = globalThis.OrderScraper.sites.find((s) => s.name === 'shopify');
+    const totals = site.findOrders(globalThis.document, `${CUSTOM.shop}/account`).map((o) => o.total);
+    c.eq('沒有合計欄 → null（不是把 2024年12月28日 當成 2024）', [...new Set(totals)], [null]);
+  }
+
+  /* 6. 多語系：Dawn 的 id / headers 不會被翻譯，只換文字結果要完全一樣 */
+  {
+    const translate = (html) => html
+      .replace(/注文履歴/g, 'Order history').replace(/注文番号/g, 'Order number').replace(/注文日/g, 'Order date')
+      .replace(/支払い状況/g, 'Payment status').replace(/発送状況/g, 'Fulfillment status')
+      .replace(/支払い済/g, 'Paid').replace(/未発送/g, 'Unfulfilled').replace(/発送済/g, 'Fulfilled')
+      .replace(/商品コード/g, 'SKU').replace(/商品名/g, 'Product').replace(/合計金額/g, 'Total')
+      .replace(/数量/g, 'Quantity').replace(/金額/g, 'Price').replace(/小計/g, 'Subtotal')
+      .replace(/送料/g, 'Shipping').replace(/発送日/g, 'Fulfilled on').replace(/荷物を追跡する/g, 'Track shipment')
+      .replace(/ノベルティ/g, 'Novelty').replace(/日付/g, 'Date').replace(/注文/g, 'Order');
+
+    const ja = await setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: serve(DAWN, DAWN_TOKEN) }).scrape();
+    const en = await setup(page(translate(DAWN.list)), `${DAWN.shop}/account`, {
+      pages: serve({ order: translate(DAWN.order) }, DAWN_TOKEN),
+    }).scrape();
+    c.eq('換語系後結果完全相同', en.orders, ja.orders);
+  }
+
+  /* 7. 只擷取目前頁面：不論網址停在第幾頁都不會去抓別頁 */
+  {
+    for (const q of ['?page=1', '?page=3', '']) {
+      const s = setup(page(DAWN.list), `${DAWN.shop}/account${q}`, { pages: serve(DAWN, DAWN_TOKEN) });
+      await s.scrape();
+      c.eq(`${q || '沒有 page 參數'} 不會再去抓訂單列表`,
+        s.asked.filter((a) => new URL(a.url).pathname.replace(/\/$/, '') === '/account'), []);
+    }
+  }
+
+  /* 8. 詳細頁全部讀不到時不輸出半筆（寧可留空也不要錯的資料） */
+  {
+    const { scrape } = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: () => null });
+    const { orders } = await scrape();
+    c.eq('詳細頁讀不到 → 沒有可輸出的包裹', orders.length, 0);
+  }
 
   return c.report();
 };

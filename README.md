@@ -147,18 +147,29 @@ content script 依站台拆開，共用同一套流程（manifest 依序載入�
 | --- | --- |
 | 訂單頁判斷 | 路徑是 `/account`，可帶語系前綴（`/zh-hant/account`、`/zh-hans/account`…）。前綴不一定是兩個字母 |
 | 訂單範圍 / 注文番号 | `a[href*="/account/orders/"]`（任何佈景主題都有），往上爬到 `<tr>` |
-| 合計（列表頁） | `td[headers~="ColumnTotal"]`；沒有該屬性時退回該列最後一個含金額的欄位 |
-| 合計（詳細頁，優先） | `td[headers~="RowTotal"]`，避開小計 / 送料 / 稅 |
-| 品名 | 詳細頁 `td[headers~="ColumnProduct"]` 裡的 `a[href*="/products/"]`；商品下架時退回該格文字 |
-| 数量 | 詳細頁 `td[headers~="ColumnQuantity"]` |
-| 配送業者 / 追蹤番号 | 詳細頁的 `.fulfillment` 區塊，格式是 `{{ tracking_company }} #{{ tracking_number }}`。`#` 是樣板寫死的字元，不是翻譯，可直接當分隔符 |
-| 画像 | 訂單頁**沒有商品圖**。改用商品連結自己的路徑加上 `.js`（`/zh-hant/products/xxx.js`）取 `featured_image`，保留語系前綴避免轉址。同一件商品只問一次，沒有追蹤號的商品不問 |
+| 合計（列表頁，可能沒有） | `td[headers~="ColumnTotal"]`；退回時要求該欄位含幣別標記（`¥` / `JPY` / `円`），否則日期欄的「2024年12月28日」會被當成金額 2024 |
+| 合計（詳細頁，優先） | `td[headers~="RowTotal"]` → class 含 `order_total` / `order-total` 的元素 → 表尾最後一個金額。都避開小計 / 送料 / 稅 |
+| 品名 | 該列的 `a[href*="/products/"]`，沒有連結時退回該列的標題元素（`h1`–`h5`） |
+| 数量 | `td[headers~="ColumnQuantity"]` → class 含 `qty` / `quantity` 的欄位 → 整格只有數字的欄位 |
+| 配送業者 / 追蹤番号 | 文字剛好是 `{{ tracking_company }} #{{ tracking_number }}` 的最內層元素。`#` 是樣板寫死的字元，不是翻譯，所以可以直接當錨點 |
+| 画像 | 該列若有 `<img>` 就直接用（去掉 Shopify CDN 的 `_100x` 尺寸後綴）。沒有才用商品連結的路徑加 `.js` 取 `featured_image`，保留語系前綴避免轉址。同一件商品只問一次 |
 
 訂單列表只有注文番号 / 日期 / 狀態 / 合計，所以**目前這一頁上的每筆訂單都要讀一次詳細頁**。
 那些頁面是伺服器渲染的，用 `fetch` 就夠，不必開 iframe。
 
-> fixture 是**依樣板輸出結構產生**的，不是實際擷取的頁面。結構正確，但實際商店可能改過佈景主題，
-> 仍需要一份真實的 `/account` 與 `/account/orders/…` 頁面校正。
+實際看過的兩種佈景主題差很多，所以解析**不靠固定的表格選擇器**：
+
+| | ちいかわマーケット（Dawn 原版） | jypj-store（客製） |
+| --- | --- | --- |
+| 欄位標示 | `id` / `headers` 屬性 | 沒有，用 class |
+| 品名 | `a[href*="/products/"]` | `<h4>`（沒有商品連結） |
+| 商品圖 | 沒有 → 另外要商品 JSON | 訂單頁上就有 `<img>` |
+| 追蹤號 | `<span>` 裡 | 追蹤連結的 `<a>` 裡 |
+| 合計 | 表尾 `td[headers~="RowTotal"]` | `<dl class="order_total">` |
+| 列表頁合計欄 | 有（`5,940.00JPY`） | **沒有** |
+
+共通點只有一個：配送資訊一律輸出「`{{ tracking_company }} #{{ tracking_number }}`」。
+所以改以那個 `#` 為錨點找出配送資訊，再往上找出它所屬的那一列，其餘欄位都在那一列裡找。
 
 ### 楽天的錨點
 
@@ -250,13 +261,13 @@ E2E 會把整個擴充功能複製一份到暫存目錄、把網域換成 localh
 | `rakuten-list-jp` | 3 筆訂單：配達完了（3 個伝票番号）、配送状況を確認できません、出荷準備中 |
 | `rakuten-list-en` | 英文列表頁（不顯示配送資訊） |
 | `rakuten-detail-{jp,en}` | 注文詳細頁：合計 / 配送業者 / 伝票番号 / 数量 |
-| `shopify-account-ja` | Shopify 訂單列表（Dawn）：2 筆訂單，一筆已出貨、一筆未出貨 |
-| `shopify-order-ja` | Shopify 注文詳細頁（Dawn）：2 件同一追蹤號、1 件未出貨 |
+| `shopify-dawn-{list,order}-ja` | ちいかわマーケット：Dawn 原版結構，合計寫成 `5,940.00JPY`，列表多一欄ノベルティ |
+| `shopify-custom-{list,order}-ja` | jypj-store：大幅客製的佈景主題（詳下） |
 
 > Amazon / 楽天的 fixture 是實際頁面，但**姓名與住址已置換成假資料**（倉庫是公開的）。測試不依賴這些欄位。
 > 未經置換的原始頁面放在 `tmp/`，已在 `.gitignore` 內。
 >
-> `shopify-*` 不是實際擷取的，是依 Dawn 樣板的輸出結構產生的，待真實頁面校正。
+> `shopify-*` 也是實際頁面，姓名 / 住址 / 電話同樣已置換。
 
 單元測試裡的 iframe 不是真的載入，而是把指定的 HTML 直接當成 `contentDocument`，
 所以 readers.js 是在那份文件上**真的跑一次**，不是回傳假結果。
@@ -267,7 +278,6 @@ fixture 清單是否齊全、fixture 有沒有混進個資。改了程式忘了�
 ## 已知限制
 
 - **只擷取目前頁面**，不會自動翻頁。訂單多的時候要自己在網站上翻頁，每頁按一次
-- Shopify 的解析尚未用真實頁面驗證過（fixture 是依 Dawn 樣板產生的）
 - Shopify 的訂單列表看不出哪些訂單有追蹤號，所以列表上的每筆訂單都要讀一次詳細頁
 - 只解析訂單列表頁與配送狀況頁 / 注文詳細頁，不會讀配送先住所、支付方式、單價
 - 另外載入的頁面一律走隱藏 iframe。站台若擋住嵌入（`x-frame-options` / `content-security-policy: frame-ancestors`）

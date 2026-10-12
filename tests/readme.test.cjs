@@ -67,9 +67,10 @@ module.exports = async function run() {
   {
     const table = md.split('| fixture | 內容 |')[1].split('\n\n')[0];
     const listed = [...table.matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1]);
+    // 檔名可能寫成 amazon-list-{jp,en,cn} 或 shopify-dawn-{list,order}-ja
     const expand = (name) => {
-      const m = name.match(/^(.*)\{([a-z,]+)\}$/);
-      return m ? m[2].split(',').map((l) => m[1] + l) : [name];
+      const m = name.match(/^(.*?)\{([a-z,]+)\}(.*)$/);
+      return m ? m[2].split(',').map((part) => m[1] + part + m[3]) : [name];
     };
     const missing = listed.flatMap(expand).filter((f) => !fs.existsSync(path.join(ROOT, 'tests/fixtures', f + '.html')));
     c.eq('README 列的 fixture 都存在', missing, []);
@@ -77,16 +78,28 @@ module.exports = async function run() {
     c.eq('fixture 都有寫進 README', files.filter((f) => !listed.flatMap(expand).includes(f)), []);
   }
 
-  /* 7. fixture 不可含個資（倉庫是公開的） */
+  /* 7. fixture 不可含個資（倉庫是公開的）。
+   *    用「形狀」判斷而不是列出實際字串 —— 黑名單本身就會把要保護的資料寫進公開倉庫。
+   *    置換後的假住址統一是 東京都 / 〒100-0001，所以只要出現別的都道府県或郵遞區號，
+   *    就表示有未經置換的實際住址混進來（新 fixture 幾乎一定會帶這兩樣）。 */
   {
-    const personal = ['黃毅仁', 'Ben Huang', '木野崎', '代官', '2119-4', '3-12-6', '242-0025', '278-0002', 'TWKYHYLJ', 'TWSS', 'JY114'];
-    const leaked = [];
+    const PREFECTURE = /北海道|青森県|岩手県|宮城県|秋田県|山形県|福島県|茨城県|栃木県|群馬県|埼玉県|千葉県|東京都|神奈川県|新潟県|富山県|石川県|福井県|山梨県|長野県|岐阜県|静岡県|愛知県|三重県|滋賀県|京都府|大阪府|兵庫県|奈良県|和歌山県|鳥取県|島根県|岡山県|広島県|山口県|徳島県|香川県|愛媛県|高知県|福岡県|佐賀県|長崎県|熊本県|大分県|宮崎県|鹿児島県|沖縄県/g;
+    const POSTAL = /〒\s*\d{3}-\d{4}/g;
+    const PLACEHOLDER = { prefecture: '東京都', postal: '〒100-0001' };
+
+    const stray = { prefecture: [], postal: [] };
     for (const f of fs.readdirSync(path.join(ROOT, 'tests/fixtures'))) {
-      const s = read(path.join('tests/fixtures', f));
-      for (const t of personal) if (s.includes(t)) leaked.push(`${f}: ${t}`);
+      const body = read(path.join('tests/fixtures', f));
+      for (const m of body.match(PREFECTURE) || []) {
+        if (m !== PLACEHOLDER.prefecture) stray.prefecture.push(`${f}: ${m}`);
+      }
+      for (const m of (body.match(POSTAL) || [])) {
+        if (m.replace(/\s/g, '') !== PLACEHOLDER.postal) stray.postal.push(`${f}: ${m}`);
+      }
     }
-    c.eq('fixture 沒有姓名 / 住址', leaked, []);
-    c.eq('tmp/ 有被 gitignore', read('.gitignore').includes('tmp/'), true);
+    c.eq('fixture 沒有未置換的都道府県', [...new Set(stray.prefecture)], []);
+    c.eq('fixture 沒有未置換的郵遞區號', [...new Set(stray.postal)], []);
+    c.eq('tmp/（未置換的原始頁面）有被 gitignore', read('.gitignore').includes('tmp/'), true);
   }
 
   return c.report();
