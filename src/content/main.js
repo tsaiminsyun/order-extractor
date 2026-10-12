@@ -7,7 +7,7 @@
   const MAX_PAGES = 50;  // 安全上限，避免無限翻頁
   const DELAY_MS = 400;  // 翻頁之間的間隔，避免被判定為機器人
 
-  const currentSite = () => sites.find((s) => s.isOrderPage(location));
+  const currentSite = () => sites.find((s) => s.isOrderPage(location, document));
 
   function progress(payload) {
     chrome.runtime.sendMessage({ type: 'SCRAPE_PROGRESS', ...payload }).catch(() => {});
@@ -15,24 +15,35 @@
 
   /* ---------- 需要真的載入才讀得到的頁面 ---------- */
 
-  // 一律用隱藏 iframe 在目前分頁內讀取：不開新分頁、不需要背景程式。
-  // 被擋下時（iframe 讀不到 DOM）就放棄這一頁，相關欄位留空
-  const readPage = async (url, reader) =>
-    (await readInFrame(url, (doc) => readers[reader](doc))) || { ok: false, error: '頁面無法在 iframe 內載入' };
+  // 另外載入的頁面分兩種讀法，由站台在 lookup 上指定 via：
+  //   'frame'（預設）前端渲染的頁面，要讓瀏覽器真的跑完 JS，用隱藏 iframe
+  //   'fetch'         伺服器就渲染好的頁面（例如 Shopify 的訂單頁），抓回來解析即可，快得多
+  async function readPage(url, reader, via) {
+    if (via === 'fetch') {
+      try {
+        const { doc } = await fetchDoc(url);
+        return await readers[reader](doc);
+      } catch (err) {
+        return { ok: false, error: String(err?.message || err) };
+      }
+    }
+    // iframe 被擋下時就放棄這一頁，相關欄位留空，不另開分頁
+    return (await readInFrame(url, (doc) => readers[reader](doc))) || { ok: false, error: '頁面無法在 iframe 內載入' };
+  }
 
   // 同一個網址只讀一次，所有網址同時讀取
   async function runLookups(orders) {
     const byUrl = new Map();
-    for (const { url, reader, apply } of orders.flatMap((o) => o.lookups)) {
-      if (!byUrl.has(url)) byUrl.set(url, { reader, waiting: [] });
+    for (const { url, reader, via, apply } of orders.flatMap((o) => o.lookups)) {
+      if (!byUrl.has(url)) byUrl.set(url, { reader, via, waiting: [] });
       byUrl.get(url).waiting.push(apply);
     }
 
     const total = byUrl.size;
     let done = 0;
     progress({ phase: 'lookup', done, total });
-    await Promise.all([...byUrl].map(async ([url, { reader, waiting }]) => {
-      const info = await readPage(url, reader);
+    await Promise.all([...byUrl].map(async ([url, { reader, via, waiting }]) => {
+      const info = await readPage(url, reader, via);
       progress({ phase: 'lookup', done: ++done, total });
       // 讀失敗或需要重新登入的頁面，相關欄位留空
       if (info.ok) for (const apply of waiting) apply(info);

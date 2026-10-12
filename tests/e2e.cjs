@@ -26,7 +26,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -103,6 +103,30 @@ setTimeout(() => { document.getElementById('app').innerHTML =
   '<div><span class="text-container--3DrET">568506023470</span></div></div>'; }, 1000);
 </script></body></html>`;
 
+/* ---------- 模擬 Shopify 商店（伺服器渲染，走 fetch 而非 iframe） ---------- */
+const SHOPIFY_TRACK = ['ヤマト運輸', '9876543210987'];
+const shopifyAccount = `<!doctype html><html><head>
+<script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
+<table role="table" class="order-history"><thead><tr>
+  <th id="ColumnOrder">注文</th><th id="ColumnTotal">合計</th></tr></thead><tbody>
+  <tr><td id="RowOrder" headers="ColumnOrder"><a href="/account/orders/tok1?key=k1">#1001</a></td>
+      <td headers="RowOrder ColumnTotal">¥4,400</td></tr>
+  <tr><td id="RowOrder" headers="ColumnOrder"><a href="/account/orders/tok2?key=k2">#1002</a></td>
+      <td headers="RowOrder ColumnTotal">¥1,980</td></tr>
+</tbody></table></body></html>`;
+
+const shopifyOrderPage = (token) => `<!doctype html><html><body>
+<table role="table" class="order-details"><thead><tr>
+  <th id="ColumnProduct">商品</th><th id="ColumnQuantity">数量</th></tr></thead><tbody>
+  <tr><td id="Row1" headers="ColumnProduct"><div><a href="/products/plush-a">ぬいぐるみA</a>
+      ${token === 'tok1' ? `<div class="fulfillment"><span>発送済み</span>
+        <span>${SHOPIFY_TRACK[0]} #${SHOPIFY_TRACK[1]}</span></div>` : ''}</div></td>
+      <td headers="Row1 ColumnQuantity">3</td></tr>
+</tbody><tfoot>
+  <tr><td id="RowSubtotal" colspan="4">小計</td><td headers="RowSubtotal">¥4,000</td></tr>
+  <tr><td id="RowTotal" colspan="3">合計</td><td headers="RowTotal" colspan="2">¥4,400 JPY</td></tr>
+</tfoot></table></body></html>`;
+
 const hits = [];
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, ORIGIN);
@@ -113,6 +137,12 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/progress-tracker/package') {
     if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
     return res.end(trackerPage(u.searchParams.get('shipmentId')));
+  }
+  if (u.pathname === '/account') return res.end(shopifyAccount);
+  if (u.pathname.startsWith('/account/orders/')) return res.end(shopifyOrderPage(u.pathname.split('/').pop()));
+  if (u.pathname === '/products/plush-a.js') {
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ title: 'ぬいぐるみA', featured_image: '//cdn.example.com/plush-a.jpg' }));
   }
   if (u.pathname === '/purchase-history/order-list/') return res.end(rakutenList);
   if (u.pathname === '/purchase-history/') {
@@ -177,6 +207,18 @@ const eq = (label, actual, expected) => {
       eq('楽天 配送業者', [...new Set(result.orders.map((o) => o.carrier))], ['ヤマト運輸']);
       eq('楽天 品名 / 圖片（不含商店 logo）', [result.orders[0].items.length, result.orders[0].items[0].title, result.orders[0].items[0].imageUrl],
         [1, '楽天の商品', 'https://thumbnail.image.rakuten.co.jp/@0_mall/teddyshop/cabinet/a.jpg']);
+    }
+
+    // Shopify（伺服器渲染 → 走 fetch，並在 content script 內抓商品 JSON 取圖）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/account`);
+      console.log(`Shopify：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('Shopify 站台', result.site, 'shopify');
+      eq('Shopify 只輸出有追蹤號的那筆', result.orders.map((o) => o.orderId), ['1001']);
+      eq('Shopify 合計取詳細頁的 RowTotal', result.orders[0].total, 4400);
+      eq('Shopify 配送業者 / 追蹤番号', [result.orders[0].carrier, result.orders[0].trackingId], SHOPIFY_TRACK);
+      eq('Shopify 品名 / 数量', [result.orders[0].items[0].title, result.orders[0].items[0].quantity], ['ぬいぐるみA', 3]);
+      eq('Shopify 商品圖（來自 /products/{handle}.js）', result.orders[0].items[0].imageUrl, 'https://cdn.example.com/plush-a.jpg');
     }
 
     // 只用 iframe，任何情況都不該開新分頁

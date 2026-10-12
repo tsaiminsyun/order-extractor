@@ -155,4 +155,92 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
   });
 
   register('rakutenDetail', readRakutenDetail, (i) => bothReady(i.total, i.shipments.length));
+
+  /* ---------- Shopify：注文詳細頁（/account/orders/…） ---------- */
+
+  /* Shopify 的訂單頁是伺服器渲染的 Liquid，不必等前端跑完。
+   * Dawn 樣板用 id / headers 屬性標示欄位（ColumnQuantity、RowTotal…），
+   * 這些屬性**不會被翻譯**，所以多語系不必比對字樣。
+   * 其他佈景主題可能改過版面，所以每個欄位都再退一層結構判斷。 */
+
+  const SHOPIFY = {
+    itemRow: 'table.order-details tbody tr',
+    product: 'td[headers~="ColumnProduct"]',
+    quantity: 'td[headers~="ColumnQuantity"]',
+    orderTotal: 'td[headers~="RowTotal"]',
+    fulfillment: '.fulfillment',
+    productLink: 'a[href*="/products/"]',
+  };
+
+  // 出貨資訊長這樣：<span>{{ tracking_company }} #{{ tracking_number }}</span>
+  // 「#」是樣板寫死的字元，不是翻譯，所以可以直接當分隔符
+  const TRACKING_RE = /^(.*?)\s*#\s*([A-Za-z0-9][A-Za-z0-9-]{3,})\s*$/;
+
+  function shopifyShipment(row) {
+    const box = row.querySelector(SHOPIFY.fulfillment);
+    if (!box) return { carrier: '', trackingId: '' };
+    for (const el of all(box, 'span')) {
+      const m = TRACKING_RE.exec(clean(el.textContent));
+      if (m) return { carrier: clean(m[1]), trackingId: m[2] };
+    }
+    return { carrier: '', trackingId: '' };
+  }
+
+  // 商品網址 /products/{handle} → /products/{handle}.js 可取得商品 JSON（含主圖）。
+  // 訂單頁本身沒有商品圖，只能另外要
+  const productHandle = (href) => String(href || '').match(/\/products\/([^/?#]+)/)?.[1] || '';
+
+  // 同一件商品常出現在多筆訂單裡，問過的就記著（存的是 Promise，同時發問也只會送出一次）
+  const productImageCache = new Map();
+
+  function shopifyImage(handle, base) {
+    if (!productImageCache.has(handle)) {
+      productImageCache.set(handle, (async () => {
+        try {
+          const res = await fetch(new URL(`/products/${handle}.js`, base).href, { credentials: 'include' });
+          if (!res.ok) return null;
+          const src = (await res.json()).featured_image;
+          return src ? (src.startsWith('//') ? `https:${src}` : src) : null;
+        } catch { return null; } // 取不到圖就留空，不影響其他欄位
+      })());
+    }
+    return productImageCache.get(handle);
+  }
+
+  async function shopifyImages(handles, base) {
+    const unique = [...new Set(handles)].filter(Boolean);
+    const urls = await Promise.all(unique.map((h) => shopifyImage(h, base)));
+    return new Map(unique.map((h, i) => [h, urls[i]]).filter(([, u]) => u));
+  }
+
+  function shopifyItems(doc) {
+    return all(doc, SHOPIFY.itemRow).map((row) => {
+      const cell = row.querySelector(SHOPIFY.product) || row.cells?.[0];
+      const link = cell?.querySelector(SHOPIFY.productLink);
+      // 品名在連結裡；沒有連結（商品已下架）時退回該格第一段文字
+      const title = clean(link?.textContent) || clean(cell?.querySelector('p, span')?.textContent);
+      const qtyCell = row.querySelector(SHOPIFY.quantity) || row.cells?.[3];
+      return {
+        title,
+        quantity: Number(clean(qtyCell?.textContent).replace(/[^\d]/g, '')) || 1,
+        handle: productHandle(attr(link, 'href')),
+        imageUrl: null,
+        ...shopifyShipment(row),
+      };
+    }).filter((i) => i.title);
+  }
+
+  // 合計取表尾的 RowTotal（總計），避開小計 / 送料 / 稅
+  const shopifyTotal = (doc) =>
+    parseMoney(clean(doc.querySelector(SHOPIFY.orderTotal)?.textContent))
+    ?? parseMoney(clean(all(doc, 'tfoot td').at(-1)?.textContent));
+
+  globalThis.OrderScraper.readers.shopifyOrder = async (doc) => {
+    if (doc.querySelector('form[action*="/account/login"]')) return { signIn: true };
+    const items = shopifyItems(doc);
+    const images = await shopifyImages(items.map((i) => i.handle), doc.baseURI || location.href);
+    for (const item of items) item.imageUrl = images.get(item.handle) || null;
+    return { ok: true, total: shopifyTotal(doc), items };
+  };
+
 })();

@@ -1,6 +1,9 @@
-# 訂單擷取（Amazon.co.jp / 楽天市場）
+# 訂單擷取（Amazon.co.jp / 楽天市場 / Shopify）
 
-Chrome 擴充功能（Manifest V3），從 Amazon.co.jp 與 楽天市場 的訂單列表頁擷取配送中的訂單，匯出 JSON。
+Chrome 擴充功能（Manifest V3），從訂單列表頁擷取配送中的訂單，匯出 JSON。
+
+支援 Amazon.co.jp、楽天市場，以及**任何 Shopify 商店**。Shopify 那一層是用頁面特徵判斷的，
+不是網域白名單 —— 代購常用的 ちいかわマーケット、ナガノマーケット、各家官方周邊店等十幾個站都走同一套。
 
 供代購 / WMS 流程使用，所以取捨偏向**寧可留空，不要抓錯**：認不出來的欄位一律空著，不猜。
 
@@ -17,21 +20,25 @@ Chrome 擴充功能（Manifest V3），從 Amazon.co.jp 與 楽天市場 的訂�
 1. 登入後開啟訂單列表頁：
    - Amazon：https://www.amazon.co.jp/gp/css/order-history
    - 楽天：https://order.my.rakuten.co.jp/purchase-history/order-list/
+   - Shopify 商店：該店的 `/account`（例如 https://chiikawamarket.jp/account）
 2. 點擴充功能圖示（popup 會顯示目前站台），按「擷取訂單」
 3. 按「下載 JSON」（檔名會帶站台，例如 `amazon-orders-20261006-0930.json`）
 
 結果會存進 `chrome.storage.local`，popup 關掉再開還看得到上次的結果。預覽表格最多顯示 100 列，下載的 JSON 不受影響。
 
-## 兩個站台的差異
+## 各站台的差異
 
-| | Amazon.co.jp | 楽天市場 |
-| --- | --- | --- |
-| 注文番号 / 品名 / 画像 | 列表頁 | 列表頁 |
-| 数量 | 列表頁（`.product-image__qty`，沒有就是 1 件） | **注文詳細頁**（列表頁沒有，用品名對回去） |
-| 合計 | 列表頁 | **注文詳細頁**（支払い金額 / Total amount） |
-| 配送業者 / 伝票番号 | **配送状況頁**（每個包裹一頁） | 日文列表頁；英文介面的列表頁沒有，改由**注文詳細頁**提供 |
-| 擷取條件 | 包裹有「配送状況を確認」按鈕（即配送中） | 訂單有伝票番号 |
-| 自動翻頁 | 有（上限 50 頁，每頁間隔 400 ms） | 尚未實作（只抓目前頁） |
+| | Amazon.co.jp | 楽天市場 | Shopify |
+| --- | --- | --- | --- |
+| 注文番号 | 列表頁 | 列表頁 | 列表頁 |
+| 品名 | 列表頁 | 列表頁 | **注文詳細頁** |
+| 画像 | 列表頁 | 列表頁 | **商品 JSON**（`/products/{handle}.js`，訂單頁沒有圖） |
+| 数量 | 列表頁（`.product-image__qty`，沒有就是 1 件） | **注文詳細頁**（列表頁沒有，用品名對回去） | **注文詳細頁**（`headers~="ColumnQuantity"`） |
+| 合計 | 列表頁 | **注文詳細頁**（支払い金額 / Total amount） | 列表頁，詳細頁的 `RowTotal` 覆蓋 |
+| 配送業者 / 伝票番号 | **配送状況頁**（每個包裹一頁） | 日文列表頁；英文介面的列表頁沒有，改由**注文詳細頁**提供 | **注文詳細頁**的 `.fulfillment` |
+| 擷取條件 | 包裹有「配送状況を確認」按鈕（即配送中） | 訂單有伝票番号 | 商品有追蹤號 |
+| 自動翻頁 | 有（上限 50 頁，每頁間隔 400 ms） | 尚未實作（只抓目前頁） | 有（`nav.pagination`） |
+| 另外載入的頁面 | iframe（前端渲染） | iframe（前端渲染） | `fetch`（伺服器渲染，快很多） |
 
 ## 為什麼一定要多讀一頁
 
@@ -94,11 +101,14 @@ content script 依站台拆開，共用同一套流程（manifest 依序載入�
 | --- | --- |
 | [util.js](src/content/util.js) | 共用小工具、切出訂單範圍（`climbUnique` / `cardsByOrderId`）、`fetch` 下一頁、隱藏 iframe 載入 |
 | [readers.js](src/content/readers.js) | 「要真的載入才讀得到」的頁面讀取器（Amazon 配送狀況頁 / 楽天 注文詳細頁），在隱藏 iframe 的文件上執行 |
-| [sites/amazon.js](src/content/sites/amazon.js)、[sites/rakuten.js](src/content/sites/rakuten.js) | 各站台的列表頁解析，回報要另外讀取哪些頁 |
+| [sites/amazon.js](src/content/sites/amazon.js)、[sites/rakuten.js](src/content/sites/rakuten.js)、[sites/shopify.js](src/content/sites/shopify.js) | 各站台的列表頁解析，回報要另外讀取哪些頁 |
 | [main.js](src/content/main.js) | 翻頁、解析、讀取詳細資料、訊息處理 |
 
-站台轉接層的介面：`isOrderPage` / `isSignInPage` / `firstPage` / `findOrders` / `nextPageUrl`。
+站台轉接層的介面：`isOrderPage(loc, doc)` / `isSignInPage` / `firstPage` / `findOrders` / `nextPageUrl`。
 要加新站台就多一個 `sites/*.js`，`main.js` 不用改。
+
+`isOrderPage` 收得到 `doc`，所以站台可以用**頁面特徵**判斷而不是網域 —— Shopify 轉接層就是這樣
+一次吃下所有 Shopify 商店的。
 
 ### 權限
 
@@ -122,6 +132,30 @@ content script 依站台拆開，共用同一套流程（manifest 依序載入�
 | 圖片 | `img[alt=品名]`，優先取 `data-a-hires` |
 | 数量 | 該圖片所屬 `.product-image` 裡的 `.product-image__qty`。只有 2 件以上才顯示，沒有就是 1 件。**只從自己那張圖找**，避免借到同包裹其他商品的數量 |
 | 配送業者 / トラッキングID | 配送狀況頁的標題「配送業者 / Shipped with / 由 X 配送」與 `.pt-delivery-card-trackingId` |
+
+### Shopify 的錨點
+
+版面依據 [Dawn](https://github.com/Shopify/dawn)（Shopify 官方開源佈景主題）的
+`sections/main-account.liquid` 與 `main-order.liquid`。
+
+關鍵：**Dawn 用 `id` / `headers` 屬性標示欄位，這些屬性不會被翻譯**，
+所以多語系完全不必比對字樣。其他佈景主題可能改過版面，因此每個欄位都再退一層結構判斷。
+
+| 欄位 | 錨點 |
+| --- | --- |
+| 訂單範圍 / 注文番号 | `a[href*="/account/orders/"]`（任何佈景主題都有），往上爬到 `<tr>` |
+| 合計（列表頁） | `td[headers~="ColumnTotal"]`；沒有該屬性時退回該列最後一個含金額的欄位 |
+| 合計（詳細頁，優先） | `td[headers~="RowTotal"]`，避開小計 / 送料 / 稅 |
+| 品名 | 詳細頁 `td[headers~="ColumnProduct"]` 裡的 `a[href*="/products/"]`；商品下架時退回該格文字 |
+| 数量 | 詳細頁 `td[headers~="ColumnQuantity"]` |
+| 配送業者 / 追蹤番号 | 詳細頁的 `.fulfillment` 區塊，格式是 `{{ tracking_company }} #{{ tracking_number }}`。`#` 是樣板寫死的字元，不是翻譯，可直接當分隔符 |
+| 画像 | 訂單頁**沒有商品圖**。改用 `/products/{handle}.js` 取 `featured_image`，同一件商品只問一次 |
+
+訂單列表只有注文番号 / 日期 / 狀態 / 合計，所以**每筆訂單都要讀一次詳細頁**。
+那些頁面是伺服器渲染的，用 `fetch` 就夠，不必開 iframe。
+
+> fixture 是**依樣板輸出結構產生**的，不是實際擷取的頁面。結構正確，但實際商店可能改過佈景主題，
+> 仍需要一份真實的 `/account` 與 `/account/orders/…` 頁面校正。
 
 ### 楽天的錨點
 
@@ -213,9 +247,13 @@ E2E 會把整個擴充功能複製一份到暫存目錄、把網域換成 localh
 | `rakuten-list-jp` | 3 筆訂單：配達完了（3 個伝票番号）、配送状況を確認できません、出荷準備中 |
 | `rakuten-list-en` | 英文列表頁（不顯示配送資訊） |
 | `rakuten-detail-{jp,en}` | 注文詳細頁：合計 / 配送業者 / 伝票番号 / 数量 |
+| `shopify-account-ja` | Shopify 訂單列表（Dawn）：2 筆訂單，一筆已出貨、一筆未出貨 |
+| `shopify-order-ja` | Shopify 注文詳細頁（Dawn）：2 件同一追蹤號、1 件未出貨 |
 
-> fixture 是實際頁面，但**姓名與住址已置換成假資料**（倉庫是公開的）。測試不依賴這些欄位。
+> Amazon / 楽天的 fixture 是實際頁面，但**姓名與住址已置換成假資料**（倉庫是公開的）。測試不依賴這些欄位。
 > 未經置換的原始頁面放在 `tmp/`，已在 `.gitignore` 內。
+>
+> `shopify-*` 不是實際擷取的，是依 Dawn 樣板的輸出結構產生的，待真實頁面校正。
 
 單元測試裡的 iframe 不是真的載入，而是把指定的 HTML 直接當成 `contentDocument`，
 所以 readers.js 是在那份文件上**真的跑一次**，不是回傳假結果。
@@ -226,6 +264,8 @@ fixture 清單是否齊全、fixture 有沒有混進個資。改了程式忘了�
 ## 已知限制
 
 - 楽天尚未自動翻頁（只抓目前頁），需要第 2 頁的網址或「次へ」按鈕的 HTML 才能實作
+- Shopify 的解析尚未用真實頁面驗證過（fixture 是依 Dawn 樣板產生的）
+- Shopify 的訂單列表看不出哪些訂單有追蹤號，所以列表上的每筆訂單都要讀一次詳細頁
 - 只解析訂單列表頁與配送狀況頁 / 注文詳細頁，不會讀配送先住所、支付方式、單價
 - 另外載入的頁面一律走隱藏 iframe。站台若擋住嵌入（`x-frame-options` / `content-security-policy: frame-ancestors`）
   且 [rules.json](rules.json) 沒涵蓋到，那一頁就讀不到，相關欄位留空

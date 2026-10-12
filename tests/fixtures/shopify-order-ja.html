@@ -1,0 +1,82 @@
+<!doctype html>
+<!-- 依 Dawn 15.2.0 sections/main-order.liquid 的輸出結構產生（非實際擷取，見 README）。
+     注文 #1001：兩件商品同一個追蹤號、一件尚未出貨（無 .fulfillment）。 -->
+<html lang="ja"><head><title>注文 #1001</title></head><body>
+<div class="customer order">
+  <div><h1 class="customer__title">アカウント</h1><a href="/account">アカウントに戻る</a></div>
+  <div>
+    <h2>注文 #1001</h2>
+    <p>2026年10月1日 14:30</p>
+    <table role="table" class="order-details">
+      <caption class="visually-hidden">注文 #1001</caption>
+      <thead role="rowgroup">
+        <tr role="row">
+          <th id="ColumnProduct" scope="col" role="columnheader">商品</th>
+          <th id="ColumnSku" scope="col" role="columnheader">SKU</th>
+          <th id="ColumnPrice" scope="col" role="columnheader">価格</th>
+          <th id="ColumnQuantity" scope="col" role="columnheader">数量</th>
+          <th id="ColumnTotal" scope="col" role="columnheader">合計</th>
+        </tr>
+      </thead>
+      <tbody role="rowgroup">
+        <tr role="row">
+          <td id="Row1111" headers="ColumnProduct" role="rowheader" scope="row" data-label="商品">
+            <div>
+              <a href="/products/chiikawa-plush">ちいかわ ぬいぐるみ</a>
+              <div class="properties"><span>サイズ: S</span></div>
+              <div class="fulfillment">
+                <span>2026年10月3日に発送されました</span>
+                <a href="https://trackings.post.japanpost.jp/services/srv/search/?requestNo1=1234567890123">配送状況を確認する</a>
+                <span>日本郵便 #1234567890123</span>
+              </div>
+            </div>
+          </td>
+          <td headers="Row1111 ColumnSku" role="cell" data-label="SKU">CK-001</td>
+          <td headers="Row1111 ColumnPrice" role="cell" data-label="価格"><span>¥1,650</span></td>
+          <td headers="Row1111 ColumnQuantity" role="cell" data-label="数量">2</td>
+          <td headers="Row1111 ColumnTotal" role="cell" data-label="合計">¥3,300</td>
+        </tr>
+        <tr role="row">
+          <td id="Row2222" headers="ColumnProduct" role="rowheader" scope="row" data-label="商品">
+            <div>
+              <a href="/products/hachiware-keychain">ハチワレ キーホルダー</a>
+              <div class="fulfillment">
+                <span>2026年10月3日に発送されました</span>
+                <a href="https://trackings.post.japanpost.jp/services/srv/search/?requestNo1=1234567890123">配送状況を確認する</a>
+                <span>日本郵便 #1234567890123</span>
+              </div>
+            </div>
+          </td>
+          <td headers="Row2222 ColumnSku" role="cell" data-label="SKU">CK-002</td>
+          <td headers="Row2222 ColumnPrice" role="cell" data-label="価格"><span>¥550</span></td>
+          <td headers="Row2222 ColumnQuantity" role="cell" data-label="数量">1</td>
+          <td headers="Row2222 ColumnTotal" role="cell" data-label="合計">¥550</td>
+        </tr>
+        <tr role="row">
+          <td id="Row3333" headers="ColumnProduct" role="rowheader" scope="row" data-label="商品">
+            <div><a href="/products/usagi-mascot">うさぎ マスコット</a></div>
+          </td>
+          <td headers="Row3333 ColumnSku" role="cell" data-label="SKU">CK-003</td>
+          <td headers="Row3333 ColumnPrice" role="cell" data-label="価格"><span>¥880</span></td>
+          <td headers="Row3333 ColumnQuantity" role="cell" data-label="数量">1</td>
+          <td headers="Row3333 ColumnTotal" role="cell" data-label="合計">¥880</td>
+        </tr>
+      </tbody>
+      <tfoot role="rowgroup">
+        <tr role="row">
+          <td id="RowSubtotal" role="rowheader" scope="row" colspan="4">小計</td>
+          <td headers="RowSubtotal" role="cell" data-label="小計">¥4,730</td>
+        </tr>
+        <tr role="row">
+          <td id="RowShipping" role="rowheader" scope="row" colspan="4">配送</td>
+          <td headers="RowShipping" role="cell" data-label="配送">¥550</td>
+        </tr>
+        <tr role="row">
+          <td id="RowTotal" role="rowheader" scope="row" colspan="3">合計</td>
+          <td headers="RowTotal" role="cell" colspan="2" data-label="合計">¥5,280 JPY</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+</body></html>
