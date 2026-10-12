@@ -19,7 +19,6 @@ async function openPopup({ tabUrl, pong, injectFails = false, pingThrows = false
     runtime: { getManifest: () => ({ version: 'test' }), onMessage: { addListener: () => {} } },
     tabs: {
       query: async () => [{ id: 7, url: tabUrl }],
-      create: () => {},
       sendMessage: async (_id, msg) => {
         if (msg.type !== 'PING') return;
         pinged += 1;
@@ -42,7 +41,8 @@ async function openPopup({ tabUrl, pong, injectFails = false, pingThrows = false
     status: d.getElementById('status').textContent,
     isError: d.getElementById('status').classList.contains('error'),
     scrapeEnabled: !d.getElementById('scrape').disabled,
-    shortcuts: [...d.querySelectorAll('.open-site')].map((b) => b.textContent),
+    // popup.html 本來就有「擷取訂單」和「下載 JSON」兩顆，多出來的就是程式動態加的
+    extraButtons: d.querySelectorAll('button').length - 2,
     injected, pinged,
   };
 }
@@ -59,7 +59,6 @@ module.exports = async function run() {
     c.eq('不在清單上的網域也會先問 content script', shopify.pinged > 0, true);
     c.eq('content script 說支援 → 可以擷取', shopify.scrapeEnabled, true);
     c.eq('狀態顯示站台名稱', shopify.status, '已就緒（Shopify 商店）');
-    c.eq('可以擷取時不顯示捷徑按鈕', shopify.shortcuts, []);
   }
 
   /* 2. 原本就支援的站台不受影響 */
@@ -71,7 +70,7 @@ module.exports = async function run() {
     c.eq('Amazon 可以擷取', [amazon.scrapeEnabled, amazon.status], [true, '已就緒（Amazon.co.jp）']);
   }
 
-  /* 3. content script 說不支援 → 停用並提供捷徑 */
+  /* 3. content script 說不支援 → 停用，只留訊息 */
   {
     const other = await openPopup({
       tabUrl: 'https://chiikawamarket.jp/products/abc',
@@ -79,7 +78,7 @@ module.exports = async function run() {
     });
     c.eq('不支援就停用擷取', other.scrapeEnabled, false);
     c.eq('顯示錯誤狀態', other.isError, true);
-    c.eq('提供快速開啟的捷徑', other.shortcuts.length > 0, true);
+    c.eq('不支援時只給訊息，不加任何按鈕', other.extraButtons, 0);
   }
 
   /* 4. 分頁裡還沒有 content script → 先注入再問 */
@@ -103,7 +102,7 @@ module.exports = async function run() {
     });
     c.eq('無法注入時停用擷取', blocked.scrapeEnabled, false);
     c.eq('無法注入時顯示錯誤', blocked.isError, true);
-    c.eq('無法注入時仍提供捷徑', blocked.shortcuts.length > 0, true);
+    c.eq('無法注入時也不加任何按鈕', blocked.extraButtons, 0);
   }
 
   return c.report();
