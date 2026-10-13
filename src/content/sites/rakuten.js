@@ -15,6 +15,11 @@
   const ITEM_LINK = 'a[href*="item.rakuten.co.jp"]';   // 商品連結（商店 logo 連的是 www.rakuten.co.jp）
   const DETAIL_BASE = 'https://order.my.rakuten.co.jp/purchase-history/';
 
+  // 出貨狀態區塊：配送進度列、配送業者、伝票番号都在裡面。一個包裹一個區塊
+  const SHIPPING_BLOCK = cls('shipping-status');
+  // 配送進度（ショップ → 出荷 → 配達店 → 配達完了）目前走到哪一步
+  const ACTIVE_STEP = cls('item-shipping-active');
+
   // 配送業者 / 伝票番号 的標籤（日 / 英）
   const LABELS = {
     carrier: /^(?:配送業者|shipping\s*company)$/i,
@@ -52,16 +57,32 @@
   // 列表頁是否顯示配送區塊。日文介面會顯示（出貨進度 / 配送業者 / 伝票番号），
   // 英文介面不顯示，這時只能進詳細頁才知道有沒有伝票番号
   const hasShippingBlock = (card) =>
-    !!card.querySelector(cls('shipping-status')) ||
+    !!card.querySelector(SHIPPING_BLOCK) ||
     !!leafText(card, LABELS.carrier).length ||
     !!leafText(card, LABELS.trackingId).length;
 
-  // 列表頁上的配送資訊（日文介面）：配送業者 / 伝票番号 的標籤旁邊就是值，可能有多組
-  function readShipments(card) {
+  /* 已送達 = 進度列的「目前狀態」落在最後一步。用結構判斷不看文字 ——
+   * 最後一步的名稱就叫「配達完了」，在途中也一樣顯示在進度列上，
+   * 比對文字會把每一筆有進度列的訂單都當成已送達 */
+  const isDelivered = (block) => {
+    const active = block.querySelector(ACTIVE_STEP);
+    return !!active && active === active.parentElement?.lastElementChild;
+  };
+
+  // 配送業者 / 伝票番号 的標籤旁邊就是值，可能有多組
+  function shipmentsIn(scope) {
     const valuesOf = (labelRe) =>
-      leafText(card, labelRe).map((el) => textOf(el.parentElement?.nextElementSibling)).filter(Boolean);
+      leafText(scope, labelRe).map((el) => textOf(el.parentElement?.nextElementSibling)).filter(Boolean);
     const carriers = valuesOf(LABELS.carrier);
     return valuesOf(LABELS.trackingId).map((trackingId, i) => ({ carrier: carriers[i] || carriers[0] || '', trackingId }));
+  }
+
+  // 列表頁上的配送資訊（日文介面）。已送達的包裹整個略過；
+  // 認不出進度的（英文介面沒有進度列）一律保留，寧可多抓也不要漏掉在途的
+  function readShipments(card) {
+    const blocks = all(card, SHIPPING_BLOCK);
+    if (!blocks.length) return shipmentsIn(card);
+    return blocks.filter((block) => !isDelivered(block)).flatMap(shipmentsIn);
   }
 
   // 詳細頁網址：列表頁的「注文詳細」連結；找不到時用注文番号自行組出來
@@ -76,7 +97,7 @@
   // 所以同一筆訂單的商品會掛在它的每個伝票番号下
   const toShipments = (pairs, items) => pairs.map(({ carrier, trackingId }) => ({ carrier, trackingId, items }));
 
-  // 沒有伝票番号的訂單不擷取（回傳 null）。列表頁看得出沒有時，連詳細頁都不載入
+  // 沒有伝票番号、或包裹都已送達的訂單不擷取（回傳 null）。列表頁看得出來時，連詳細頁都不載入
   // 数量只在詳細頁，用品名對回列表頁的商品；品名對不上時依出現順序，都對不上就當 1 件
   function applyQuantities(items, quantities) {
     const byTitle = new Map(quantities.map((q) => [q.title, q.quantity]));

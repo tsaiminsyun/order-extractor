@@ -31,6 +31,7 @@
     qty: '.product-image__qty',
     deliveryBox: '.delivery-box',
     track: 'a[href*="/progress-tracker/package"]',
+    status: '.yohtmlc-shipment-status-primaryText, .delivery-box__primary-text',
     signIn: '#ap_email, #authportal-main-section',
   };
 
@@ -41,6 +42,10 @@
   // 合計的標籤：合計（日）/ Total（英）/ 总价（簡中）
   const TOTAL_LABEL_RE = /合計|total|总价/i;
   const ORDER_PAGE_RE = /\/(gp\/css\/order-history|your-orders|gp\/your-account\/order-history)/;
+  /* 已送達的包裹狀態文字（日 / 英 / 簡中）。送達後「配送状況を確認」按鈕還會留著好一陣子，
+   * 光看按鈕分不出在途或已送達，只能讀包裹的狀態文字。
+   * 簡中一定要連「已」一起比對 —— 在途顯示的是「预计…送达」，只比「送达」會把在途的也濾掉 */
+  const DELIVERED_RE = /お届け済み|^delivered\b|^已.{0,12}送达/i;
 
   const asinOf = (href) => String(href || '').match(/\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})/)?.[1] || null;
   const idText = (el) => textOf(el).match(ORDER_ID_RE)?.[0] || null;
@@ -118,6 +123,10 @@
 
   /* ---------- 包裹 ---------- */
 
+  // 已送達的包裹不擷取。讀不到狀態（其他語系、或版面沒有這一行）時一律當成配送中保留 ——
+  // 漏抓一個在途的包裹，比多抓一個已送達的嚴重
+  const isDelivered = (el) => DELIVERED_RE.test(textOf(el?.querySelector(SEL.status)));
+
   // 一個 .delivery-box 就是一個包裹，裡面可能有多件商品，共用同一組配送資訊
   function findShipments(card) {
     const tracks = all(card, SEL.track);
@@ -138,14 +147,18 @@
 
   /* ---------- 組合 ---------- */
 
-  // 只保留配送中的商品：包裹有「配送状況を確認」按鈕才算配送中，
-  // 已送達（或尚未出貨）的包裹沒有這個按鈕，整個略過。
+  // 只保留配送中的商品：包裹要有「配送状況を確認」按鈕（尚未出貨的沒有），
+  // 而且狀態不是已送達。兩個條件都不符的包裹整個略過。
   // 一個包裹一筆，配送業者 / トラッキングID 由配送狀況頁補上。
   // 完全沒有配送中的包裹時回傳 null（整筆訂單不擷取）
   function buildOrder({ orderId, card, products }, baseUrl) {
     const shipments = findShipments(card);
+    // 先把商品配對到包裹，再濾掉已送達的那些 —— 順序不能反過來：
+    // shipmentOf 的「只有一個包裹就直接用」是看整張訂單，先濾掉會讓已送達那箱的商品錯配到剩下那箱
     const shipping = products
-      .map((product) => ({ product, trackingUrl: absUrl(shipmentOf(product.el, shipments)?.trackHref, baseUrl) }))
+      .map((product) => ({ product, shipment: shipmentOf(product.el, shipments) }))
+      .filter(({ shipment }) => shipment && !isDelivered(shipment.el))
+      .map(({ product, shipment }) => ({ product, trackingUrl: absUrl(shipment.trackHref, baseUrl) }))
       .filter(({ trackingUrl }) => trackingUrl);
     if (!shipping.length) return null;
 

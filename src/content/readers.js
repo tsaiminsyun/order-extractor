@@ -85,8 +85,14 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
   const RAKUTEN_ITEM_LINK = 'a[href*="item.rakuten.co.jp"]';
 
-  // 出貨狀態區塊。配送業者 / 伝票番号 一定在這裡面
+  // 出貨狀態區塊。配送業者 / 伝票番号 一定在這裡面，一個包裹一個區塊
   const SHIPPING_BLOCK = cls('shipping-status');
+  // 已送達 = 配送進度列的「目前狀態」落在最後一步（與列表頁同一套判斷，見 sites/rakuten.js）
+  const ACTIVE_STEP = cls('item-shipping-active');
+  const isDelivered = (block) => {
+    const active = block.querySelector(ACTIVE_STEP);
+    return !!active && active === active.parentElement?.lastElementChild;
+  };
 
   // 標籤與值是同一列的相鄰區塊：<div><span>配送業者</span></div><div>…值…</div>
   // 金額則是 <span>支払い金額</span><div>…<div class="number-display--…">10,660</div></div>
@@ -113,20 +119,30 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
   // 認不得標籤時（其他語系）的後備：配送業者是連到業者查詢頁的外部連結，aria-label 就是業者名。
   // 範圍一定要限制在出貨狀態區塊內：頁面別處的活動連結（例如「○倍の注意点」）同樣是
   // 帶長數字的外部連結，不限制範圍就會被當成配送業者，產生假的伝票番号
-  const carrierLinks = (doc) =>
-    all(doc, `${SHIPPING_BLOCK} a[href^="http"]`)
+  const carrierLinks = (block) =>
+    all(block, 'a[href^="http"]')
       .filter((a) => isExternal(attr(a, 'href')))
       .map((a) => ({ carrier: clean(attr(a, 'aria-label')), trackingId: trackingInHref(attr(a, 'href')) }))
       .filter((s) => s.carrier && s.trackingId);
 
-  // 一筆訂單可能有多個伝票番号（分批出貨），依出現順序配對
-  function rakutenShipments(doc) {
-    const carriers = labelsIn(doc, RAKUTEN_LABELS.carrier).map(valueOf);
-    const trackingIds = labelsIn(doc, RAKUTEN_LABELS.trackingId).map(valueOf).filter(Boolean);
+  // 一筆訂單可能有多個伝票番号（分批出貨），依出現順序配對。
+  // block 為真時才用連結後備 —— 那個後備一定要限制在出貨狀態區塊內（見上面的註解）
+  function shipmentsIn(scope, block) {
+    const carriers = labelsIn(scope, RAKUTEN_LABELS.carrier).map(valueOf);
+    const trackingIds = labelsIn(scope, RAKUTEN_LABELS.trackingId).map(valueOf).filter(Boolean);
     if (trackingIds.length) {
       return trackingIds.map((trackingId, i) => ({ carrier: carriers[i] || carriers[0] || '', trackingId }));
     }
-    return carrierLinks(doc);
+    return block ? carrierLinks(scope) : [];
+  }
+
+  // 已送達的包裹不擷取。英文版的詳細頁沒有出貨狀態區塊，認不出進度，整份文件照舊讀
+  const liveBlocks = (doc) => all(doc, SHIPPING_BLOCK).filter((block) => !isDelivered(block));
+
+  function rakutenShipments(doc) {
+    const blocks = all(doc, SHIPPING_BLOCK);
+    if (!blocks.length) return shipmentsIn(doc, false);
+    return liveBlocks(doc).flatMap((block) => shipmentsIn(block, true));
   }
 
   // 認不得標籤時取字最大的那個金額（詳細頁用字級區分小計與支払い金額）
@@ -150,11 +166,14 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
   const readRakutenDetail = (doc) => ({
     ok: true,
     total: parseMoney(valueOf(labelsIn(doc, RAKUTEN_LABELS.total)[0])) ?? parseMoney(biggestAmount(doc)),
+    // 包裹全部已送達：這筆不擷取，配送資料不會再出現，別白等
+    delivered: !!all(doc, SHIPPING_BLOCK).length && !liveBlocks(doc).length,
     shipments: rakutenShipments(doc),
     quantities: rakutenQuantities(doc),
   });
 
-  register('rakutenDetail', readRakutenDetail, (i) => bothReady(i.total, i.shipments.length));
+  register('rakutenDetail', readRakutenDetail,
+    (i) => (i.delivered ? !!i.total : bothReady(i.total, i.shipments.length)));
 
   /* ---------- Shopify：注文詳細頁（/account/orders/…） ---------- */
 

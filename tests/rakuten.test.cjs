@@ -3,6 +3,9 @@
  *                         配送状況を確認できません、出荷準備中（後兩筆沒有伝票番号，不擷取）
  * rakuten-list-en.html    英文列表頁：一筆訂單、2 件商品，列表頁不顯示配送資訊
  * rakuten-detail-{jp,en}  注文詳細頁：合計 / 配送業者 / 伝票番号
+ *
+ * 日文那兩份的包裹都已送達，依規則不擷取（第 13 項驗這件事）。其他欄位的解析
+ * 改用 inTransit() 處理過的版本，見下面的說明。
  */
 const fs = require('fs');
 const path = require('path');
@@ -11,8 +14,27 @@ const { setup, Check, JSDOM, loadReaders } = require('./harness.cjs');
 const URL_LIST = 'https://order.my.rakuten.co.jp/purchase-history/order-list/';
 const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
 const page = (body) => `<html><body>${body}</body></html>`;
-const LIST = { jp: fixture('rakuten-list-jp.html'), en: fixture('rakuten-list-en.html') };
-const DETAIL = { jp: fixture('rakuten-detail-jp.html'), en: fixture('rakuten-detail-en.html') };
+/* 實際頁面上這些包裹都已送達（配送進度停在最後一步）。已送達的不擷取，
+ * 所以要驗其他欄位，就把進度列的「目前狀態」標記從最後一步移到「出荷」。
+ * 判斷規則只看「目前狀態是不是最後一步」，所以只要動這一個 class，
+ * 不必捏造配送中的文案 —— 其餘 HTML 與使用者給的完全一樣 */
+function inTransit(body) {
+  const dom = new JSDOM(page(body));
+  for (const active of dom.window.document.querySelectorAll('[class*="item-shipping-active--"]')) {
+    const token = [...active.classList].find((c) => c.startsWith('item-shipping-active--'));
+    const shipped = active.parentElement.children[1]; // ショップ → 出荷 → 配達店 → 配達完了
+    const done = [...shipped.classList].find((c) => c.startsWith('item-done--'));
+    active.classList.remove(token);
+    if (done) shipped.classList.remove(done);
+    shipped.classList.add(token);
+  }
+  return dom.window.document.body.innerHTML;
+}
+
+// 使用者給的原始頁面（已送達），第 13 項用
+const DELIVERED = { list: fixture('rakuten-list-jp.html'), detail: fixture('rakuten-detail-jp.html') };
+const LIST = { jp: inTransit(DELIVERED.list), en: fixture('rakuten-list-en.html') };
+const DETAIL = { jp: inTransit(DELIVERED.detail), en: fixture('rakuten-detail-en.html') };
 
 const JP = {
   orderId: '297942-20260918-0695404827',
@@ -184,6 +206,25 @@ module.exports = async function run() {
     const { scrape } = setup(page(LIST.jp), URL_LIST, { pages: () => null });
     const { orders } = await scrape();
     c.eq('讀不到詳細頁 → 数量 1 件', [...new Set(orders.flatMap((o) => o.items.map((i) => i.quantity)))], [1]);
+  }
+
+  /* 13. 已送達的訂單不擷取。使用者給的實際頁面就是這個狀態：
+   *     3 個伝票番号都在，但配送進度停在最後一步 */
+  {
+    const { scrape, asked } = setup(page(DELIVERED.list), URL_LIST, { pages: detailPage('jp') });
+    const { orders } = await scrape();
+    c.eq('已送達 → 不擷取', orders.length, 0);
+    c.eq('已送達 → 不載入詳細頁', asked.length, 0);
+    c.eq('這筆確實有伝票番号', JP.trackingIds.every((t) => DELIVERED.list.includes(t)), true);
+
+    // 詳細頁同一套判斷
+    loadReaders();
+    const info = await globalThis.OrderScraper.readers.rakutenDetail(new JSDOM(page(DELIVERED.detail)).window.document);
+    c.eq('詳細頁已送達 → 配送欄位留空', info.shipments, []);
+    c.eq('詳細頁已送達 → 合計仍讀得到', info.total, 10660);
+
+    // 不能用文字判斷：「配達完了」是進度列最後一步的名稱，配送中的頁面一樣有這四個字
+    c.eq('配送中的頁面同樣有「配達完了」字樣', LIST.jp.includes('配達完了'), true);
   }
 
   return c.report();

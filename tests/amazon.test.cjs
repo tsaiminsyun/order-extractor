@@ -19,6 +19,9 @@ const HEADER = (id, label, money, dup = false) => `
     <div class="yohtmlc-order-id"><span class="a-text-caps">注文番号</span><span dir="ltr">${id}</span></div>
     ${dup ? `<div class="a-mobile-only"><div class="yohtmlc-order-id"><span dir="ltr">${id}</span></div></div>` : ''}
   </div>`;
+// 包裹的狀態標題（お届け済み / お届け予定 …）。結構取自實際頁面
+const STATUS = (text) => `<div class="yohtmlc-shipment-status-primaryText"><h3>
+  <span class="a-size-medium delivery-box__primary-text a-text-bold">${text}</span></h3></div>`;
 const CARD = (inner) => `<div class="order-card js-order-card">${inner}</div>`;
 const BOX = (inner) => `<div class="a-box delivery-box"><div class="a-box-inner">${inner}</div></div>`;
 const PAGE = (inner) => `<html><body><div class="your-orders-content-container">${inner}</div></body></html>`;
@@ -155,6 +158,36 @@ module.exports = async function run() {
       [['三件的商品', 3], ['一件的商品', 1], ['兩件的商品', 2]]);
   }
 
+  /* 11. 只擷取配送中：已送達的包裹略過，但在途的文案不可被誤判
+   *     （三個語系的已送達字樣取自實際頁面，見 amazon-real.test.cjs 第 5 項） */
+  {
+    const withStatus = (status) => PAGE(CARD(HEADER('503-7097018-1651051', '合計', '￥2,322') +
+      BOX(STATUS(status) + IMG('B0DZ1VTY4W', '爪切り') + TITLE('B0DZ1VTY4W', '爪切り') + TRACK('S1'))));
+    const count = async (status) => {
+      const { scrape } = setup(withStatus(status), URL_LIST, { pages: trackingPages });
+      return (await scrape()).orders.length;
+    };
+
+    for (const status of ['8月23日にお届け済み', 'Delivered August 23', '已于 8月23日 送达']) {
+      c.eq(`已送達不擷取：${status}`, await count(status), 0);
+    }
+
+    // 在途的文案一樣有「お届け」「delivery」「送达」，不能跟著被濾掉
+    for (const status of ['8月25日にお届け予定', 'Arriving tomorrow', 'Out for delivery', '预计 8月25日 送达']) {
+      c.eq(`配送中仍擷取：${status}`, await count(status), 1);
+    }
+
+    c.eq('沒有狀態那一行時保留', await count(''), 1);
+
+    // 同一筆訂單兩個包裹，一個已送達一個在途：已送達那箱的商品不可混進來
+    const mixed = PAGE(CARD(HEADER('503-0000000-0000011', '合計', '￥9,000') +
+      BOX(STATUS('8月23日にお届け済み') + IMG('B0DONE00001', '已送達的商品') + TITLE('B0DONE00001', '已送達的商品') + TRACK('S1')) +
+      BOX(STATUS('8月25日にお届け予定') + IMG('B0LIVE00001', '在途的商品') + TITLE('B0LIVE00001', '在途的商品') + TRACK('S2'))));
+    const { scrape } = setup(mixed, URL_LIST, { pages: trackingPages });
+    const { orders } = await scrape();
+    c.eq('兩個包裹只留在途那箱', orders.map((o) => [o.trackingId, o.items.map((i) => i.title)]),
+      [['1234-5678-9012', ['在途的商品']]]);
+  }
 
   return c.report();
 };

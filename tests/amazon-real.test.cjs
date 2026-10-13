@@ -1,5 +1,7 @@
 /* Amazon.co.jp 注文履歴：以使用者提供的實際 HTML 為測試資料（已移除 script / style）
- * amazon-list-{jp,en,cn}.html      配送中的訂單：1 件商品，沒有數量標示（＝1 件）
+ * amazon-list-{jp,en,cn}.html      1 件商品、沒有數量標示（＝1 件）。狀態是
+ *                                  「8月23日にお届け済み / Delivered August 23 / 已于 8月23日 送达」，
+ *                                  已送達，依規則不擷取（第 5 項）；其他欄位的解析用 inTransit() 驗
  * amazon-list-qty-{jp,en,cn}.html  數量 4 件的訂單（.product-image__qty）。這筆已送達，
  *                                  沒有「配送状況を確認」按鈕，所以依規則不擷取
  * amazon-detail-{jp,en,cn}.html    配送狀況頁：配送業者 / トラッキングID
@@ -30,6 +32,16 @@ const WANT = {
 // iframe 會真的載入這份配送狀況頁，再由 readers.js 解析
 const detailPage = (lang) => () => `<html><body>${DETAIL[lang]}</body></html>`;
 
+/* 實際頁面上這筆已經送達，依規則不擷取。要驗其他欄位的解析，就把包裹的狀態那一行清空 ——
+ * 判斷規則是「只有讀到已送達的字樣才略過」，讀不到狀態一律當配送中，
+ * 所以這裡不必捏造「配送中」的文案，清掉就夠 */
+function inTransit(html) {
+  const dom = new JSDOM(html);
+  for (const el of dom.window.document.querySelectorAll('.yohtmlc-shipment-status-primaryText')) el.textContent = '';
+  return dom.serialize();
+}
+const IN_TRANSIT = Object.fromEntries(LANGS.map((l) => [l, inTransit(LIST[l])]));
+
 module.exports = async function run() {
   const c = new Check('Amazon 注文履歴（實際 HTML）');
 
@@ -46,7 +58,7 @@ module.exports = async function run() {
   /* 2. 列表頁 + 配送狀況頁：三個語系都解析出同一筆訂單 */
   {
     for (const lang of LANGS) {
-      const { scrape, asked } = setup(LIST[lang], URL_LIST, { pages: detailPage(lang) });
+      const { scrape, asked } = setup(IN_TRANSIT[lang], URL_LIST, { pages: detailPage(lang) });
       const { orders } = await scrape();
       c.eq(`${lang} 訂單數`, orders.length, 1);
       c.eq(`${lang} 注文番号`, orders[0]?.orderId, WANT.orderId);
@@ -91,6 +103,23 @@ module.exports = async function run() {
       ], [true, true]);
       c.eq(`${lang} 合計`, orders[0]?.total, 14968);
     }
+  }
+
+  /* 5. 已送達的包裹不擷取 —— 送達後「配送状況を確認」按鈕還留著，光看按鈕分不出來 */
+  {
+    for (const lang of LANGS) {
+      const { scrape, asked } = setup(LIST[lang], URL_LIST, { pages: detailPage(lang) });
+      const { orders } = await scrape();
+      c.eq(`${lang} 已送達 → 不擷取`, orders.length, 0);
+      c.eq(`${lang} 已送達就不讀配送狀況頁`, asked.length, 0);
+      c.eq(`${lang} 這筆確實還有配送按鈕`, LIST[lang].includes('/progress-tracker/package'), true);
+    }
+
+    // 其他語系讀不到狀態字樣，這時一律當成配送中保留，不要連在途的也漏掉
+    const unknown = LIST.jp.replace(/8月23日にお届け済み/g, '8월 23일에 배달 완료');
+    const { scrape } = setup(unknown, URL_LIST, { pages: detailPage('jp') });
+    const { orders } = await scrape();
+    c.eq('認不得的語系 → 保留', orders.length, 1);
   }
 
   return c.report();

@@ -29,6 +29,11 @@ module.exports = async function run() {
     c.eq('等渲染上限 15 秒', [md.includes('上限 15 秒'), readers.includes('RENDER_TIMEOUT_MS = 15000')], [true, true]);
     c.eq('部分欄位再等 2 秒', [md.includes('再等 2 秒'), readers.includes('PARTIAL_WAIT_MS = 2000')], [true, true]);
     c.eq('預覽上限 100 列', [md.includes('最多顯示 100 列'), read('popup.js').includes('PREVIEW_LIMIT = 100')], [true, true]);
+    c.eq('只擷取配送中的訂單', [
+      md.includes('只擷取配送中的訂單'),
+      read('src/content/sites/amazon.js').includes('DELIVERED_RE'),
+      read('src/content/sites/rakuten.js').includes('isDelivered'),
+    ], [true, true, true]);
   }
 
   /* 3. README 提到的選擇器要真的在程式裡 */
@@ -41,6 +46,8 @@ module.exports = async function run() {
       ['item.rakuten.co.jp', 'src/content/sites/rakuten.js'],
       ['act=detail_page_view', 'src/content/sites/rakuten.js'],
       ['shipping-status', 'src/content/readers.js'],
+      ['item-shipping-active', 'src/content/sites/rakuten.js'],
+      ['.yohtmlc-shipment-status-primaryText', 'src/content/sites/amazon.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

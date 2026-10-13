@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "訂單擷取（Amazon.co.jp / 楽天）",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "擷取 Amazon.co.jp 與 楽天市場 的訂單內容，並匯出 JSON",
   "action": {
     "default_popup": "popup.html",
