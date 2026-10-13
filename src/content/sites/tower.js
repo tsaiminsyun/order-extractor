@@ -16,6 +16,7 @@
     about: '.deliveryAbout',   // 注文番号 / 注文日 / 数量 / 注文合計 的那幾張小表
     label: 'td.ttl',
     shipmentNo: '.dlvrIcon',   // 「配送1」：跟在注文番号後面，不是番号的一部分
+    status: '.deliverySt',       // 「2026/10/09 に出荷しました」、送達後會多一個「（受取済）」
     item: '.deliveryItemBox',
     title: '.title a',
     image: '.deliveryThum img',
@@ -25,6 +26,10 @@
   };
 
   const LABELS = { orderId: '注文番号', total: '注文合計' };
+
+  /* 已送達：出荷の表示に「（受取済）」が付く。沒有就是還在配送中。
+   * 讀不到狀態時當成配送中保留 —— 漏抓在途的包裹比多抓已送達的嚴重 */
+  const isDelivered = (box) => /受取済/.test(textOf(box.querySelector(SEL.status)));
 
   /* 配送業者由伝票番号的查詢網址判斷。頁面上也有「配送業者」欄位，但那是下單時的
    * 指定（實際頁面上是「指定なし」），不是真正送件的業者，不能拿來用 */
@@ -96,9 +101,11 @@
     return byId;
   }
 
-  // 沒有伝票番号的配送還沒出貨，不擷取；整筆訂單都沒有就回傳 null
+  // 沒有伝票番号的還沒出貨、「（受取済）」的已經送達，兩種都不擷取；
+  // 整筆訂單都沒剩就回傳 null。合計照樣從第一個區塊讀（每個區塊都帶整筆訂單的合計）
   function buildOrder(orderId, boxes) {
     const shipments = boxes
+      .filter((box) => !isDelivered(box))
       .map((box) => ({ shipment: readShipment(box), items: findItems(box) }))
       .filter(({ shipment }) => shipment)
       .map(({ shipment, items }) => ({ ...shipment, items }));

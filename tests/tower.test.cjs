@@ -104,7 +104,21 @@ module.exports = async function run() {
     c.eq('都沒有数量 → 1 件', (await read(noQty))[0]?.items[0]?.quantity, 1);
   }
 
-  /* 7. PING 回報站台；不是會員頁就不該認得 */
+  /* 7. 已送達（出荷表示後面多一個「（受取済）」）→ 不擷取。
+   *    實際頁面上這筆還在配送中，所以受取済的版本是加上那四個字造出來的 */
+  {
+    const received = BOX.replace('に出荷しました', 'に出荷しました（受取済）');
+    c.eq('實際頁面是配送中（沒有受取済）', BOX.includes('受取済'), false);
+    c.eq('受取済 → 不擷取', (await read(received)).length, 0);
+
+    // 一筆訂單兩次配送，只有其中一次受取済 → 另一次仍要擷取
+    const second = BOX.replace('配送1', '配送2').replace(new RegExp(WANT.trackingId, 'g'), '320443645422');
+    const orders = await read(received + second);
+    c.eq('只留還在配送中的那次', orders.map((o) => o.trackingId), ['320443645422']);
+    c.eq('合計仍讀得到（來自第一個區塊）', orders[0]?.total, WANT.total);
+  }
+
+  /* 8. PING 回報站台；不是會員頁就不該認得 */
   {
     const { ping } = setup(page(BOX), URL_LIST);
     const pong = await ping();

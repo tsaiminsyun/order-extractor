@@ -130,13 +130,14 @@ const shopifyOrderPage = (token) => `<!doctype html><html><body>
 
 /* ---------- 模擬 タワーレコード（所有欄位都在列表頁，完全不另外載入） ---------- */
 const TOWER_TRACK = ['日本郵便', '320443645421'];
-// 一筆訂單分成兩次配送（配送1 / 配送2），第二次還沒出貨 → 只該輸出第一次
-const towerBox = (no, tracking) => `<div class="deliveryBox">
+/* 一筆訂單分成三次配送：第一次在途、第二次還沒出貨（沒有伝票番号）、
+ * 第三次已送達（出荷表示後面多了「（受取済）」）→ 只該輸出第一次 */
+const towerBox = (no, tracking, received) => `<div class="deliveryBox">
   <div class="deliveryAbout">
     <table><tbody><tr><td class="ttl">注文番号</td><td>：26J08212058264<span class="dlvrIcon">配送${no}</span></td></tr></tbody></table>
     <table><tbody><tr><td class="ttl">注文合計</td><td>：￥1,870</td></tr></tbody></table>
   </div>
-  <div class="deliveryStArea"><span class="deliverySt">2026/10/09 に出荷しました</span></div>
+  <div class="deliveryStArea"><span class="deliverySt">2026/10/09 に出荷しました${received ? '（受取済）' : ''}</span></div>
   <div><div class="deliveryDetail">
     <div class="deliveryItemArea"><div class="deliveryItemBox">
       <figure class="deliveryThum"><a href="/item/8057086"><img src="https://cdn.tower.jp/za/l/9W/a.JPG" alt="祈り、終われば"></a></figure>
@@ -150,7 +151,7 @@ const towerBox = (no, tracking) => `<div class="deliveryBox">
     </div>
   </div></div>
 </div>`;
-const towerList = `<!doctype html><html><body>${towerBox(1, TOWER_TRACK[1])}${towerBox(2, '')}</body></html>`;
+const towerList = `<!doctype html><html><body>${towerBox(1, TOWER_TRACK[1], false)}${towerBox(2, '', false)}${towerBox(3, '320443645499', true)}</body></html>`;
 
 const hits = [];
 const server = http.createServer((req, res) => {
@@ -253,7 +254,7 @@ const eq = (label, actual, expected) => {
       const { result, secs } = await scrape(`${ORIGIN}/ec/Customer/Order/List`);
       console.log(`タワーレコード：${result.orders.length} 筆訂單、耗時 ${secs}s`);
       eq('タワー 站台', result.site, 'tower');
-      eq('タワー 只輸出已出貨的那次配送', result.orders.map((o) => o.trackingId), [TOWER_TRACK[1]]);
+      eq('タワー 只輸出在途的那次配送（略過未出荷與受取済）', result.orders.map((o) => o.trackingId), [TOWER_TRACK[1]]);
       eq('タワー 注文番号 / 合計', [result.orders[0].orderId, result.orders[0].total], ['26J08212058264', 1870]);
       eq('タワー 配送業者（由查詢網址判斷）', result.orders[0].carrier, TOWER_TRACK[0]);
       eq('タワー 品名 / 数量 / 画像', [result.orders[0].items[0].title, result.orders[0].items[0].quantity,
