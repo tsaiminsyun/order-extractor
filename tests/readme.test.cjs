@@ -48,6 +48,8 @@ module.exports = async function run() {
       ['shipping-status', 'src/content/readers.js'],
       ['item-shipping-active', 'src/content/sites/rakuten.js'],
       ['.yohtmlc-shipment-status-primaryText', 'src/content/sites/amazon.js'],
+      ['.deliveryBox', 'src/content/sites/tower.js'],
+      ['.ship-num', 'src/content/sites/tower.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

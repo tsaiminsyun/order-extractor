@@ -26,7 +26,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -36,6 +36,7 @@ const patch = (file, from, to) => {
 patch('src/content/sites/amazon.js', "/(^|\\.)amazon\\.co\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/rakuten.js', "/(^|\\.)rakuten\\.co\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/rakuten.js', "'https://order.my.rakuten.co.jp/purchase-history/'", `'${ORIGIN}/purchase-history/'`);
+patch('src/content/sites/tower.js', "/(^|\\.)tower\\.jp$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -127,6 +128,30 @@ const shopifyOrderPage = (token) => `<!doctype html><html><body>
   <tr><td id="RowTotal" colspan="3">合計</td><td headers="RowTotal" colspan="2">¥4,400 JPY</td></tr>
 </tfoot></table></body></html>`;
 
+/* ---------- 模擬 タワーレコード（所有欄位都在列表頁，完全不另外載入） ---------- */
+const TOWER_TRACK = ['日本郵便', '320443645421'];
+// 一筆訂單分成兩次配送（配送1 / 配送2），第二次還沒出貨 → 只該輸出第一次
+const towerBox = (no, tracking) => `<div class="deliveryBox">
+  <div class="deliveryAbout">
+    <table><tbody><tr><td class="ttl">注文番号</td><td>：26J08212058264<span class="dlvrIcon">配送${no}</span></td></tr></tbody></table>
+    <table><tbody><tr><td class="ttl">注文合計</td><td>：￥1,870</td></tr></tbody></table>
+  </div>
+  <div class="deliveryStArea"><span class="deliverySt">2026/10/09 に出荷しました</span></div>
+  <div><div class="deliveryDetail">
+    <div class="deliveryItemArea"><div class="deliveryItemBox">
+      <figure class="deliveryThum"><a href="/item/8057086"><img src="https://cdn.tower.jp/za/l/9W/a.JPG" alt="祈り、終われば"></a></figure>
+      <div class="deliveryItmDtl"><p class="title"><a href="/item/8057086">祈り、終われば</a></p>
+        <p class="pDetail">￥1,650　数量：1</p>
+        <div class="ship-num">数量：<span>1</span></div></div>
+    </div></div>
+    <div class="deliveryRightClm">
+      <p>配送問い合わせ番号：${tracking ? `<a href="http://tracking.post.japanpost.jp/service/singleSearch.do?reqCodeNo1=${tracking}">${tracking}</a>` : ''}</p>
+      <p><a href="/ec/Customer/Receipt.aspx?orderId=26J08212058264"><span class="blueTxt">領収書/購入明細書</span></a></p>
+    </div>
+  </div></div>
+</div>`;
+const towerList = `<!doctype html><html><body>${towerBox(1, TOWER_TRACK[1])}${towerBox(2, '')}</body></html>`;
+
 const hits = [];
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, ORIGIN);
@@ -144,6 +169,7 @@ const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     return res.end(JSON.stringify({ title: 'ぬいぐるみA', featured_image: '//cdn.example.com/plush-a.jpg' }));
   }
+  if (u.pathname === '/ec/Customer/Order/List') return res.end(towerList);
   if (u.pathname === '/purchase-history/order-list/') return res.end(rakutenList);
   if (u.pathname === '/purchase-history/') {
     if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
@@ -219,6 +245,21 @@ const eq = (label, actual, expected) => {
       eq('Shopify 配送業者 / 追蹤番号', [result.orders[0].carrier, result.orders[0].trackingId], SHOPIFY_TRACK);
       eq('Shopify 品名 / 数量', [result.orders[0].items[0].title, result.orders[0].items[0].quantity], ['ぬいぐるみA', 3]);
       eq('Shopify 商品圖（來自 /products/{handle}.js）', result.orders[0].items[0].imageUrl, 'https://cdn.example.com/plush-a.jpg');
+    }
+
+    // タワーレコード（列表頁就有全部欄位 → 一頁都不該多讀）
+    {
+      const before = hits.length;
+      const { result, secs } = await scrape(`${ORIGIN}/ec/Customer/Order/List`);
+      console.log(`タワーレコード：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('タワー 站台', result.site, 'tower');
+      eq('タワー 只輸出已出貨的那次配送', result.orders.map((o) => o.trackingId), [TOWER_TRACK[1]]);
+      eq('タワー 注文番号 / 合計', [result.orders[0].orderId, result.orders[0].total], ['26J08212058264', 1870]);
+      eq('タワー 配送業者（由查詢網址判斷）', result.orders[0].carrier, TOWER_TRACK[0]);
+      eq('タワー 品名 / 数量 / 画像', [result.orders[0].items[0].title, result.orders[0].items[0].quantity,
+        result.orders[0].items[0].imageUrl], ['祈り、終われば', 1, 'https://cdn.tower.jp/za/l/9W/a.JPG']);
+      // 擷取期間只該打那一次列表頁，沒有任何額外請求
+      eq('タワー 不另外載入頁面', hits.slice(before), ['/ec/Customer/Order/List']);
     }
 
     // 只用 iframe，任何情況都不該開新分頁

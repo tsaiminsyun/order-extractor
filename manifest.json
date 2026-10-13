@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "訂單擷取（Amazon.co.jp / 楽天）",
-  "version": "0.16.0",
-  "description": "擷取 Amazon.co.jp 與 楽天市場 的訂單內容，並匯出 JSON",
+  "name": "訂單擷取（Amazon / 楽天 / Shopify / タワーレコード）",
+  "version": "0.17.0",
+  "description": "從 Amazon.co.jp、楽天市場、Shopify 商店、タワーレコード 的訂單列表擷取配送中的訂單，匯出 JSON",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "訂單擷取（Amazon.co.jp / 楽天）"
+    "default_title": "訂單擷取（Amazon / 楽天 / Shopify / タワーレコード）"
   },
   "permissions": [
     "activeTab",
@@ -16,7 +16,8 @@
   "host_permissions": [
     "https://www.amazon.co.jp/*",
     "https://order.my.rakuten.co.jp/*",
-    "https://chiikawamarket.jp/*"
+    "https://chiikawamarket.jp/*",
+    "https://tower.jp/*"
   ],
   "declarative_net_request": {
     "rule_resources": [
@@ -35,7 +36,8 @@
         "https://www.amazon.co.jp/gp/your-account/order-history*",
         "https://order.my.rakuten.co.jp/purchase-history/*",
         "https://chiikawamarket.jp/account*",
-        "https://chiikawamarket.jp/*/account*"
+        "https://chiikawamarket.jp/*/account*",
+        "https://tower.jp/ec/*"
       ],
       "js": [
         "src/content/util.js",
@@ -43,6 +45,7 @@
         "src/content/sites/amazon.js",
         "src/content/sites/rakuten.js",
         "src/content/sites/shopify.js",
+        "src/content/sites/tower.js",
         "src/content/main.js"
       ],
       "run_at": "document_idle"

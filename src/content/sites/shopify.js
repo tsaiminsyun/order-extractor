@@ -98,7 +98,6 @@
   globalThis.OrderScraper.sites.push({
     name: 'shopify',
     label: 'Shopify 商店',
-    orderListUrl: '/account',
     isOrderPage: (loc, doc) => ACCOUNT_PATH_RE.test(loc.pathname) && isShopify(doc),
     isSignInPage: (doc, url) => /\/account\/login/.test(url) || !!doc.querySelector(SEL.signIn),
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),

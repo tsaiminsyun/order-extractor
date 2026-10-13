@@ -127,7 +127,6 @@
   globalThis.OrderScraper.sites.push({
     name: 'rakuten',
     label: '楽天市場',
-    orderListUrl: 'https://order.my.rakuten.co.jp/purchase-history/order-list/',
     isOrderPage: (loc) => /(^|\.)rakuten\.co\.jp$/.test(loc.hostname) && loc.pathname.includes('/purchase-history'),
     isSignInPage: (doc, url) => /grp\d+\.id\.rakuten\.co\.jp|\/login/.test(url) || !!doc.querySelector('#loginInner, input[name="u"]'),
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),

@@ -195,7 +195,6 @@
   globalThis.OrderScraper.sites.push({
     name: 'amazon',
     label: 'Amazon.co.jp',
-    orderListUrl: 'https://www.amazon.co.jp/gp/css/order-history',
     isOrderPage: (loc) => /(^|\.)amazon\.co\.jp$/.test(loc.hostname) && ORDER_PAGE_RE.test(loc.pathname),
     isSignInPage: (doc, url) => /\/ap\/signin/.test(url) || !!doc.querySelector(SEL.signIn),
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),
