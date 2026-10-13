@@ -1,17 +1,22 @@
 /* タワーレコード オンライン（tower.jp）：以使用者提供的實際 HTML 為測試資料
- * tower-list-jp.html  注文履歴：一筆訂單、一次配送、1 件商品（姓名 / 住址 / 電話 / 卡號已置換）
+ * tower-list-jp.html  注文履歴：兩筆訂單 —— 一筆還在配送中、一筆已送達
+ *                     （出荷表示後面多了「（受取済）」）。姓名 / 住址 / 電話 / 卡號已置換
  *
  * 這個站台的列表頁就有全部欄位，所以正常情況下**完全不會另外載入頁面**（第 1 項會檢查）。
- * 分批出貨與多筆訂單的情境實際頁面上沒有，是拿同一份 HTML 複製後改注文番号 /
- * 配送序號 / 伝票番号造出來的，標在各該項目上。
+ * 分批出貨、多筆訂單、其他配送業者這幾種情境實際頁面上沒有，是拿配送中那一筆複製後
+ * 改注文番号 / 配送序號 / 伝票番号造出來的，標在各該項目上。
  */
 const fs = require('fs');
 const path = require('path');
-const { setup, Check } = require('./harness.cjs');
+const { setup, Check, JSDOM } = require('./harness.cjs');
 
 const URL_LIST = 'https://tower.jp/ec/Customer/Order/List';
-const BOX = fs.readFileSync(path.join(__dirname, 'fixtures', 'tower-list-jp.html'), 'utf8');
+const LIST = fs.readFileSync(path.join(__dirname, 'fixtures', 'tower-list-jp.html'), 'utf8');
 const page = (body) => `<html><body>${body}</body></html>`;
+
+// 兩筆訂單各自的 HTML：第一筆配送中、第二筆已送達
+const [LIVE, RECEIVED] = [...new JSDOM(page(LIST)).window.document.querySelectorAll('.deliveryBox')]
+  .map((el) => el.outerHTML);
 
 const WANT = {
   orderId: '26J08212058264',
@@ -21,6 +26,7 @@ const WANT = {
   carrier: '日本郵便',
   trackingId: '320443645421',
 };
+const DONE = { orderId: '26H08201239949', trackingId: '320435102072' };
 
 // 沒給 pages 時，harness 的 fetch / iframe 一被用到就會丟錯 —— 正好拿來確認「不讀別的頁」
 const read = async (body) => (await setup(page(body), URL_LIST).scrape()).orders;
@@ -28,103 +34,108 @@ const read = async (body) => (await setup(page(body), URL_LIST).scrape()).orders
 module.exports = async function run() {
   const c = new Check('タワーレコード（實際 HTML）');
 
-  /* 1. 實際頁面：所有欄位都在列表頁上，不必另外載入任何頁面 */
+  /* 1. 實際頁面：兩筆訂單只輸出配送中的那筆，所有欄位都在列表頁上 */
   {
-    const { scrape, asked } = setup(page(BOX), URL_LIST);
+    const { scrape, asked } = setup(page(LIST), URL_LIST);
     const { orders, site } = await scrape();
     c.eq('站台', site, 'tower');
-    c.eq('訂單數', orders.length, 1);
-    c.eq('注文番号（不含後面的「配送1」）', orders[0]?.orderId, WANT.orderId);
+    c.eq('頁面上有兩筆訂單', [...new JSDOM(page(LIST)).window.document.querySelectorAll('.deliveryBox')].length, 2);
+    c.eq('只輸出配送中的那筆', orders.map((o) => o.orderId), [WANT.orderId]);
     c.eq('合計（注文合計）', orders[0]?.total, WANT.total);
     c.eq('品名', orders[0]?.items.map((i) => i.title), [WANT.title]);
     c.eq('画像', orders[0]?.items[0]?.imageUrl, WANT.image);
     c.eq('数量', orders[0]?.items[0]?.quantity, 1);
     c.eq('配送業者 / 伝票番号', [orders[0]?.carrier, orders[0]?.trackingId], [WANT.carrier, WANT.trackingId]);
+    c.eq('注文番号不含後面的「配送1」', orders[0]?.orderId.includes('配送'), false);
     c.eq('完全不另外載入頁面', asked.length, 0);
   }
 
-  /* 2. 配送業者由伝票番号的查詢網址判斷 ——
+  /* 2. 已送達那筆是因為「（受取済）」被略過，不是因為缺資料 ——
+   *    它該有的欄位一樣不缺，只差出荷表示後面那四個字 */
+  {
+    c.eq('已送達那筆有伝票番号', RECEIVED.includes(DONE.trackingId), true);
+    c.eq('出荷表示有（受取済）', /に出荷しました（受取済）/.test(RECEIVED), true);
+    c.eq('配送中那筆沒有受取済', LIVE.includes('受取済'), false);
+    c.eq('單獨解析也不擷取', (await read(RECEIVED)).length, 0);
+
+    // 把那四個字拿掉就該擷取得到 —— 證明略過的原因只有它
+    const asLive = RECEIVED.replace('（受取済）', '');
+    c.eq('拿掉受取済就擷取得到', (await read(asLive)).map((o) => [o.orderId, o.trackingId]),
+      [[DONE.orderId, DONE.trackingId]]);
+  }
+
+  /* 3. 配送業者由伝票番号的查詢網址判斷 ——
    *    頁面上的「配送業者」欄位是下單時的指定，實際頁面上寫的是「指定なし」 */
   {
-    c.eq('頁面上的配送業者欄位是「指定なし」', BOX.includes('指定なし'), true);
+    c.eq('頁面上的配送業者欄位是「指定なし」', LIVE.includes('指定なし'), true);
 
-    const yamato = BOX.replace(/http:\/\/tracking\.post\.japanpost\.jp[^"]*/,
-      'https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?no01=320443645421');
-    c.eq('ヤマト運輸', (await read(yamato))[0]?.carrier, 'ヤマト運輸');
-
-    const sagawa = BOX.replace(/http:\/\/tracking\.post\.japanpost\.jp[^"]*/,
-      'https://k2k.sagawa-exp.co.jp/p/web/okurijosearch.do?okurijoNo=320443645421');
-    c.eq('佐川急便', (await read(sagawa))[0]?.carrier, '佐川急便');
+    const withLink = (url) => LIVE.replace(/http:\/\/tracking\.post\.japanpost\.jp[^"]*/, url);
+    c.eq('ヤマト運輸',
+      (await read(withLink('https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?no01=320443645421')))[0]?.carrier,
+      'ヤマト運輸');
+    c.eq('佐川急便',
+      (await read(withLink('https://k2k.sagawa-exp.co.jp/p/web/okurijosearch.do?okurijoNo=320443645421')))[0]?.carrier,
+      '佐川急便');
 
     // 認不得的業者：業者名留空，但伝票番号仍要保留（抓不到好過抓錯）
-    const unknown = BOX.replace(/http:\/\/tracking\.post\.japanpost\.jp[^"]*/, 'https://example.com/t/320443645421');
-    const orders = await read(unknown);
+    const orders = await read(withLink('https://example.com/t/320443645421'));
     c.eq('認不得的業者 → 留空但保留伝票番号', [orders[0]?.carrier, orders[0]?.trackingId], ['', WANT.trackingId]);
   }
 
-  /* 3. 還沒出貨（沒有配送問い合わせ番号）→ 不擷取 */
+  /* 4. 還沒出貨（沒有配送問い合わせ番号）→ 不擷取 */
   {
-    const notShipped = BOX.replace(/<p>配送問い合わせ番号：<a[^]*?<\/a><\/p>/, '<p>配送問い合わせ番号：</p>');
+    const notShipped = LIVE.replace(/<p>配送問い合わせ番号：<a[^]*?<\/a><\/p>/, '<p>配送問い合わせ番号：</p>');
     c.eq('確實把伝票番号拿掉了', notShipped.includes(WANT.trackingId), false);
     c.eq('沒有伝票番号 → 不擷取', (await read(notShipped)).length, 0);
   }
 
-  /* 4. 同一筆訂單分批出貨（配送1 / 配送2）：併成一筆訂單的兩個包裹。
+  /* 5. 同一筆訂單分批出貨（配送1 / 配送2）：併成一筆訂單的兩個包裹。
    *    main.js 會依注文番号去重，分開回傳會被吃掉一筆 —— 這一項就是在釘這件事。
    *    （實際頁面只有一次配送，這份是複製後改配送序號與伝票番号造出來的） */
   {
-    const second = BOX.replace('配送1', '配送2').replace(new RegExp(WANT.trackingId, 'g'), '320443645422');
-    const orders = await read(BOX + second);
+    const second = LIVE.replace('配送1', '配送2').replace(new RegExp(WANT.trackingId, 'g'), '320443645422');
+    const orders = await read(LIVE + second);
     c.eq('同一注文番号的兩次配送各一筆', orders.map((o) => o.orderId), [WANT.orderId, WANT.orderId]);
     c.eq('兩個伝票番号都在', orders.map((o) => o.trackingId), [WANT.trackingId, '320443645422']);
     c.eq('合計重複出現（一筆訂單的合計）', orders.map((o) => o.total), [WANT.total, WANT.total]);
     c.eq('各自帶著自己的商品', orders.map((o) => o.items.length), [1, 1]);
+
+    // 其中一次已送達時，只留還在路上的那次，合計仍讀得到
+    const mixed = await read(LIVE.replace('に出荷しました', 'に出荷しました（受取済）') + second);
+    c.eq('一次受取済 → 只留另一次', mixed.map((o) => o.trackingId), ['320443645422']);
+    c.eq('第一個區塊被濾掉，合計仍讀得到', mixed[0]?.total, WANT.total);
   }
 
-  /* 5. 兩筆不同的訂單（同樣是複製後改注文番号與伝票番号） */
+  /* 6. 兩筆不同的訂單（同樣是複製後改注文番号與伝票番号） */
   {
-    const other = BOX.replace(new RegExp(WANT.orderId, 'g'), '26J08212058265')
+    const other = LIVE.replace(new RegExp(WANT.orderId, 'g'), '26J08212058265')
       .replace(new RegExp(WANT.trackingId, 'g'), '320443645423');
-    const orders = await read(BOX + other);
+    const orders = await read(LIVE + other);
     c.eq('兩筆訂單', orders.map((o) => [o.orderId, o.trackingId]),
       [[WANT.orderId, WANT.trackingId], ['26J08212058265', '320443645423']]);
   }
 
-  /* 6. 数量：.ship-num 沒有時退回商品明細的「￥1,650　数量：1」 */
+  /* 7. 数量：.ship-num 沒有時退回商品明細的「￥1,650　数量：1」 */
   {
-    const threeInShipNum = BOX.replace('<div class="ship-num">数量：<span>1</span></div>',
+    const threeInShipNum = LIVE.replace('<div class="ship-num">数量：<span>1</span></div>',
       '<div class="ship-num">数量：<span>3</span></div>');
     c.eq('.ship-num 的数量', (await read(threeInShipNum))[0]?.items[0]?.quantity, 3);
 
-    const noShipNum = BOX.replace(/<div class="ship-num">[^]*?<\/div>/, '')
+    const noShipNum = LIVE.replace(/<div class="ship-num">[^]*?<\/div>/, '')
       .replace('￥1,650　数量：1', '￥1,650　数量：2');
     c.eq('退回商品明細的数量', (await read(noShipNum))[0]?.items[0]?.quantity, 2);
 
-    const noQty = BOX.replace(/<div class="ship-num">[^]*?<\/div>/, '').replace('　数量：1', '');
+    const noQty = LIVE.replace(/<div class="ship-num">[^]*?<\/div>/, '').replace('　数量：1', '');
     c.eq('都沒有数量 → 1 件', (await read(noQty))[0]?.items[0]?.quantity, 1);
-  }
-
-  /* 7. 已送達（出荷表示後面多一個「（受取済）」）→ 不擷取。
-   *    實際頁面上這筆還在配送中，所以受取済的版本是加上那四個字造出來的 */
-  {
-    const received = BOX.replace('に出荷しました', 'に出荷しました（受取済）');
-    c.eq('實際頁面是配送中（沒有受取済）', BOX.includes('受取済'), false);
-    c.eq('受取済 → 不擷取', (await read(received)).length, 0);
-
-    // 一筆訂單兩次配送，只有其中一次受取済 → 另一次仍要擷取
-    const second = BOX.replace('配送1', '配送2').replace(new RegExp(WANT.trackingId, 'g'), '320443645422');
-    const orders = await read(received + second);
-    c.eq('只留還在配送中的那次', orders.map((o) => o.trackingId), ['320443645422']);
-    c.eq('合計仍讀得到（來自第一個區塊）', orders[0]?.total, WANT.total);
   }
 
   /* 8. PING 回報站台；不是會員頁就不該認得 */
   {
-    const { ping } = setup(page(BOX), URL_LIST);
+    const { ping } = setup(page(LIST), URL_LIST);
     const pong = await ping();
     c.eq('PING 站台', [pong.onOrderPage, pong.site, pong.label], [true, 'tower', 'タワーレコード']);
 
-    const item = setup(page(BOX), 'https://tower.jp/item/8057086');
+    const item = setup(page(LIST), 'https://tower.jp/item/8057086');
     c.eq('商品頁不是訂單頁', (await item.ping()).onOrderPage, false);
 
     const empty = setup(page('<div>マイページ</div>'), URL_LIST);
