@@ -22,12 +22,30 @@ const day = (n) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const order = (orderId, orderedAt, extra = {}) =>
-  ({ orderId, orderedAt, total: 1000, currency: 'JPY', trackingIds: [], itemCount: 1, needsLookup: true, ...extra });
+/* recent / old 是 content script（main.js）標好的，popup 不自己算日期。
+ * 這裡照同一套規則產生，所以「幾天算新」改了之後，popup 不必跟著改 */
+const RECENT_DAYS = 7;
+const daysOld = (orderedAt) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((today.getTime() - Date.parse(`${orderedAt}T00:00:00`)) / 86400000);
+};
+const order = (orderId, orderedAt, extra = {}) => ({
+  orderId,
+  orderedAt,
+  recent: orderedAt != null && daysOld(orderedAt) >= 0 && daysOld(orderedAt) < RECENT_DAYS,
+  old: orderedAt != null && daysOld(orderedAt) >= RECENT_DAYS,
+  total: 1000,
+  currency: 'JPY',
+  trackingIds: [],
+  itemCount: 1,
+  needsLookup: true,
+  ...extra,
+});
 
 // popup.js 一載入就會跑 checkTab()，所以每個情境都要重新載入一次（用查詢字串避開模組快取）
 let seq = 0;
-async function openPopup({ tabUrl, pong, orders = [], injectFails = false, pingThrows = false, previewFails = false }) {
+async function openPopup({ tabUrl, pong, orders = [], pages = 1, injectFails = false, pingThrows = false, previewFails = false }) {
   const dom = new JSDOM(POPUP_HTML, { url: 'chrome-extension://test/popup.html' });
   const injected = [];
   const sent = [];
@@ -45,7 +63,9 @@ async function openPopup({ tabUrl, pong, orders = [], injectFails = false, pingT
           return pong;
         }
         if (msg.type === 'PREVIEW') {
-          return previewFails ? { ok: false, error: '解析失敗' } : { ok: true, orders };
+          return previewFails
+            ? { ok: false, error: '解析失敗' }
+            : { ok: true, orders, pages, scanned: orders.length, recentDays: RECENT_DAYS };
         }
         if (msg.type === 'SCRAPE') return { ok: true, site: 'test', orders: [] };
         return undefined;
@@ -127,7 +147,7 @@ module.exports = async function run() {
     c.eq('日期不明的照樣列出來 —— 不知道就不要默默藏起來', p.listed.includes('沒日期'), true);
     c.eq('列出來的七天內訂單預設勾選', p.checked, ['今天', '第6天']);
     c.eq('日期不明的不預設勾選', p.checked.includes('沒日期'), false);
-    c.eq('提示寫出這一頁其實有幾筆', p.hint, '7 天內 3 筆（這一頁共 5 筆）');
+    c.eq('提示寫出總共掃過幾筆', p.hint, '7 天內 3 筆（掃過 5 筆）');
     c.eq('沒有任何按鈕可以把舊訂單叫出來', p.extraButtons, 0);
     c.eq('按鈕寫出勾了幾筆', p.scrapeLabel, '擷取選取的 2 筆');
   }
@@ -161,7 +181,7 @@ module.exports = async function run() {
     });
     c.eq('一筆都不列', p.listed, []);
     c.eq('不能擷取', p.scrapeEnabled, false);
-    c.eq('說明為什麼是空的', p.status, '這一頁沒有 7 天內的訂單（共 2 筆都更舊）');
+    c.eq('說明為什麼是空的', p.status, '沒有 7 天內的訂單（掃過 2 筆都更舊）');
     c.eq('沒有任何按鈕可以把它們叫出來', p.extraButtons, 0);
   }
 
@@ -216,7 +236,25 @@ module.exports = async function run() {
     c.eq('沒列出來的更不會被送出', scrape?.payload?.orderIds.includes('Z4'), false);
   }
 
-  /* 10. content script 說不支援 → 不列清單、不能擷取 */
+  /* 10. 自動翻頁：翻了幾頁要讓使用者知道，不然會以為清單只來自眼前這一頁 */
+  {
+    const many = await openPopup({
+      tabUrl: 'https://chiikawamarket.jp/account',
+      pong: SHOPIFY,
+      orders: [order('P1', day(0)), order('P2', day(3))],
+      pages: 3,
+    });
+    c.eq('狀態寫出翻了幾頁', many.status, '已就緒（Shopify 商店，翻了 3 頁）');
+
+    const single = await openPopup({
+      tabUrl: 'https://chiikawamarket.jp/account',
+      pong: SHOPIFY,
+      orders: [order('P1', day(0))],
+    });
+    c.eq('只有一頁時不提翻頁', single.status, '已就緒（Shopify 商店）');
+  }
+
+  /* 11. content script 說不支援 → 不列清單、不能擷取 */
   {
     const other = await openPopup({
       tabUrl: 'https://chiikawamarket.jp/products/abc',

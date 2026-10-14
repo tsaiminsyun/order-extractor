@@ -78,7 +78,9 @@ function setup(html, url, { pages } = {}) {
   const scrape = (payload = {}) =>
     new Promise((res) => listeners.at(-1)({ type: 'SCRAPE', payload }, null, res));
   const ping = () => new Promise((res) => listeners.at(-1)({ type: 'PING' }, null, res));
-  return { dom, scrape, ping, asked, listeners };
+  // 擷取前的清單（會翻頁，但不讀詳細頁）
+  const preview = () => new Promise((res) => listeners.at(-1)({ type: 'PREVIEW' }, null, res));
+  return { dom, scrape, preview, ping, asked, listeners };
 }
 
 /* ---------- 斷言 ---------- */

@@ -189,5 +189,35 @@ module.exports = async function run() {
       [['1234-5678-9012', ['在途的商品']]]);
   }
 
+  /* 12. 自動翻頁（前端渲染的站台走隱藏 iframe）。
+   *     實際的 Amazon 分頁區塊沒拿到，所以這裡用通用規則認得的形式：帶 href 的「次へ」連結。
+   *     規則本身在 util 的 nextPageLink —— 認不出來就停在目前這一頁，不會出錯 */
+  {
+    const NEXT = (href) => `<a href="${href}">次へ</a>`;
+    const card = (n) => CARD(HEADER(`503-000000${n}-0000001`, '合計', '￥2,322') +
+      BOX(IMG(`B0PAGE0000${n}`, `第${n}頁的商品`) + TITLE(`B0PAGE0000${n}`, `第${n}頁的商品`) + TRACK('S1')));
+
+    const pages = {
+      '/your-orders/orders': PAGE(card(1) + NEXT('/your-orders/orders?page=2')),
+      '/your-orders/orders?page=2': PAGE(card(2) + NEXT('/your-orders/orders?page=3')),
+      '/your-orders/orders?page=3': PAGE(''),   // 空頁 → 停
+    };
+    const serve = (url) => {
+      const u = new URL(url);
+      return pages[u.pathname + u.search] ?? trackingPages(url);
+    };
+
+    const s = setup(pages['/your-orders/orders'], URL_LIST, { pages: serve });
+    const list = await s.preview();
+    c.eq('兩頁的訂單都掃到', list.orders.map((o) => o.orderId), ['503-0000001-0000001', '503-0000002-0000001']);
+    c.eq('翻到空頁就停', list.pages, 3);
+    c.eq('翻頁是用 iframe 載入的', s.asked.map((a) => new URL(a.url).search), ['?page=2', '?page=3']);
+
+    // 認不出下一頁時停在目前這一頁，行為跟沒有分頁功能一樣
+    const alone = setup(PAGE(card(1)), URL_LIST, { pages: trackingPages });
+    const only = await alone.preview();
+    c.eq('沒有下一頁就只掃一頁', [only.pages, only.orders.length], [1, 1]);
+  }
+
   return c.report();
 };

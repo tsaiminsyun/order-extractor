@@ -123,7 +123,7 @@ const shopifyOrderPage = (token) => `<!doctype html><html><body>
 <table role="table" class="order-details"><thead><tr>
   <th id="ColumnProduct">商品</th><th id="ColumnQuantity">数量</th></tr></thead><tbody>
   <tr><td id="Row1" headers="ColumnProduct"><div><a href="/products/plush-a">ぬいぐるみA</a>
-      ${token === 'tok1' ? `<div class="fulfillment"><span>発送済み</span>
+      ${token === 'tok1' || token === 'tok3' ? `<div class="fulfillment"><span>発送済み</span>
         <span>${SHOPIFY_TRACK[0]} #${SHOPIFY_TRACK[1]}</span></div>` : ''}</div></td>
       <td headers="Row1 ColumnQuantity">3</td></tr>
 </tbody><tfoot>
@@ -156,6 +156,19 @@ const towerBox = (no, tracking, received) => `<div class="deliveryBox">
 </div>`;
 const towerList = `<!doctype html><html><body>${towerBox(1, TOWER_TRACK[1], false)}${towerBox(2, '', false)}${towerBox(3, '320443645499', true)}</body></html>`;
 
+// 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
+const shopifyAccount2 = `<!doctype html><html><head>
+<script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
+<table role="table" class="order-history"><thead><tr>
+  <th id="ColumnOrder">注文</th><th id="ColumnTotal">合計</th></tr></thead><tbody>
+  <tr><td id="RowOrder" headers="ColumnOrder"><a href="/account/orders/tok3?key=k3">#1003</a></td>
+      <td headers="RowOrder ColumnTotal">¥2,200</td></tr>
+</tbody></table></body></html>`;
+
+const shopifyEmpty = `<!doctype html><html><head>
+<script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
+<table role="table" class="order-history"><tbody></tbody></table></body></html>`;
+
 const hits = [];
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, ORIGIN);
@@ -167,7 +180,10 @@ const server = http.createServer((req, res) => {
     if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
     return res.end(trackerPage(u.searchParams.get('shipmentId')));
   }
-  if (u.pathname === '/account') return res.end(shopifyAccount);
+  if (u.pathname === '/account') {
+    const n = Number(u.searchParams.get('page') || 1);
+    return res.end(n === 1 ? shopifyAccount : n === 2 ? shopifyAccount2 : shopifyEmpty);
+  }
   if (u.pathname.startsWith('/account/orders/')) return res.end(shopifyOrderPage(u.pathname.split('/').pop()));
   if (u.pathname === '/products/plush-a.js') {
     res.setHeader('Content-Type', 'application/json');
@@ -244,7 +260,8 @@ const eq = (label, actual, expected) => {
       const { result, secs } = await scrape(`${ORIGIN}/account`);
       console.log(`Shopify：${result.orders.length} 筆訂單、耗時 ${secs}s`);
       eq('Shopify 站台', result.site, 'shopify');
-      eq('Shopify 只輸出有追蹤號的那筆', result.orders.map((o) => o.orderId), ['1001']);
+      eq('Shopify 兩頁都掃到，只輸出有追蹤號的', result.orders.map((o) => o.orderId), ['1001', '1003']);
+      eq('Shopify 翻頁走 ?page=', hits.filter((h) => h === '/account').length >= 3, true);
       eq('Shopify 合計取詳細頁的 RowTotal', result.orders[0].total, 4400);
       eq('Shopify 配送業者 / 追蹤番号', [result.orders[0].carrier, result.orders[0].trackingId], SHOPIFY_TRACK);
       eq('Shopify 品名 / 数量', [result.orders[0].items[0].title, result.orders[0].items[0].quantity], ['ぬいぐるみA', 3]);

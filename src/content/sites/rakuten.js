@@ -7,7 +7,7 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, cls, parseDate, absUrl, climbUnique,
+  const { clean, textOf, attr, all, cls, parseDate, absUrl, nextPageLink, climbUnique,
     countOrderIds, cardsByOrderId, byDocumentOrder } = globalThis.OrderScraper.util;
 
   const ORDER_ID_RE = /\d{4,8}-\d{8}-\d{8,12}/;
@@ -134,6 +134,12 @@
     label: '楽天市場',
     isOrderPage: (loc) => /(^|\.)rakuten\.co\.jp$/.test(loc.hostname) && loc.pathname.includes('/purchase-history'),
     isSignInPage: (doc, url) => /grp\d+\.id\.rakuten\.co\.jp|\/login/.test(url) || !!doc.querySelector('#loginInner, input[name="u"]'),
+    /* 樂天的「次へ」是 <button> 不是連結（整頁是前端渲染的 SPA），所以這裡多半回 null，
+     * 也就是停在目前這一頁。要翻頁得在頁面裡按那顆按鈕，還沒做 */
+    nextPage: (doc, pageUrl) => {
+      const url = nextPageLink(doc, pageUrl);
+      return url ? { url, via: 'frame' } : null;
+    },
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),
   });
 })();

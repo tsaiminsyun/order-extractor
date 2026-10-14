@@ -9,7 +9,7 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, parseMoney, parseDate } = globalThis.OrderScraper.util;
+  const { clean, textOf, attr, all, parseMoney, parseDate, nextPageLink } = globalThis.OrderScraper.util;
 
   const SEL = {
     box: '.deliveryBox',
@@ -129,6 +129,11 @@
     label: 'タワーレコード',
     isOrderPage: (loc, doc) => /(^|\.)tower\.jp$/.test(loc.hostname) && loc.pathname.startsWith('/ec/') && hasOrders(doc),
     isSignInPage: (doc, url) => /\/ec\/.*(?:login|signin)/i.test(url),
+    // 伺服器渲染，下一頁用 fetch 取回就好
+    nextPage: (doc, pageUrl) => {
+      const url = nextPageLink(doc, pageUrl);
+      return url ? { url, via: 'fetch' } : null;
+    },
     findOrders: (doc) => [...groupByOrderId(doc)].map(([orderId, boxes]) => buildOrder(orderId, boxes)),
   });
 })();

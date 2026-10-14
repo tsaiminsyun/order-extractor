@@ -13,7 +13,8 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, parseMoney, parseDate, absUrl, climbUnique, countMatches } = globalThis.OrderScraper.util;
+  const { clean, textOf, attr, all, parseMoney, parseDate, absUrl, nextPageLink, bumpPageParam,
+    climbUnique, countMatches } = globalThis.OrderScraper.util;
 
   const SEL = {
     orderTable: 'table.order-history',
@@ -110,6 +111,13 @@
     label: 'Shopify 商店',
     isOrderPage: (loc, doc) => ACCOUNT_PATH_RE.test(loc.pathname) && isShopify(doc),
     isSignInPage: (doc, url) => /\/account\/login/.test(url) || !!doc.querySelector(SEL.signIn),
+    /* 佈景主題有畫分頁就照著走；沒有的話直接把 ?page=N 加一 —— Shopify 的帳戶頁一律吃這個參數。
+     * 加過頭也不會有事：回來的是同一頁或空頁，上層發現沒有新的注文番号就會停。
+     * 訂單頁是伺服器渲染的，用 fetch 就夠 */
+    nextPage: (doc, pageUrl) => {
+      const url = nextPageLink(doc, pageUrl) || bumpPageParam(pageUrl);
+      return url ? { url, via: 'fetch' } : null;
+    },
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),
   });
 })();

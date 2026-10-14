@@ -10,10 +10,6 @@ const CONTENT_SCRIPTS = [
   "src/content/main.js",
 ];
 const PREVIEW_LIMIT = 100;
-/* 這個擴充功能只要配送中的訂單。已送達的在認得出來的站台上就被擋掉了
- * （見 README 的「只擷取配送中的訂單」），認不出來的站台改用「下單未滿幾天」當替代條件 ——
- * 七天前下的單多半已經到貨。超過的一律不列出來 */
-const RECENT_DAYS = 7;
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -31,7 +27,10 @@ const els = {
 };
 
 let lastResult = null;
-let candidates = [];   // 這一頁上的全部訂單（七天前的不會列出來）
+/* 掃描結果。old / recent 是 content script 標好的 ——
+ * 「幾天內算新」那條線定義在 main.js，這裡不重算，免得兩邊各有一份會走鐘 */
+let candidates = [];
+let recentDays = 7;    // 只用來寫訊息，實際的判斷看每筆訂單的 old / recent
 
 /* ---------- 小工具 ---------- */
 
@@ -57,25 +56,6 @@ function setProgress(text) {
   els.progress.classList.toggle('hidden', !text);
   els.progress.textContent = text || '';
 }
-
-/* ---------- 注文日 ---------- */
-
-const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
-
-// 注文日是 YYYY-MM-DD（站台顯示的那個日期），當成本地時間算，不要再經過一次時區換算
-const daysAgo = (orderedAt) =>
-  Math.round((startOfToday() - Date.parse(`${orderedAt}T00:00:00`)) / 86400000);
-
-// 日期讀不到的不預設勾選 —— 不知道就別替使用者決定。清單上仍然看得到，要勾自己勾
-const isRecent = (orderedAt) => {
-  if (!orderedAt) return false;
-  const days = daysAgo(orderedAt);
-  return days >= 0 && days < RECENT_DAYS;
-};
-
-// 「舊」要有日期才算得出來。日期不明的不當成舊的，照樣列出來（但不預設勾選）——
-// 站台改版導致日期抓不到時，訂單不該整批無聲消失
-const isOld = (orderedAt) => orderedAt != null && daysAgo(orderedAt) >= RECENT_DAYS;
 
 /* ---------- 分頁 ---------- */
 
@@ -114,13 +94,13 @@ function candidateRow(order) {
   const box = el('input');
   box.type = 'checkbox';
   box.value = order.orderId;
-  box.checked = isRecent(order.orderedAt);
+  box.checked = order.recent;
   box.addEventListener('change', syncControls);
 
   const date = order.orderedAt
-    ? el('span', { className: 'c-date', text: order.orderedAt, title: `${daysAgo(order.orderedAt)} 天前` })
+    ? el('span', { className: 'c-date', text: order.orderedAt })
     : el('span', { className: 'c-date muted', text: '日期不明' });
-  if (isRecent(order.orderedAt)) date.classList.add('recent');
+  if (order.recent) date.classList.add('recent');
 
   // 列表頁上就看得到伝票番号時直接顯示；Shopify 與楽天英文介面要讀詳細頁才知道
   const note = order.trackingIds.length
@@ -138,13 +118,13 @@ function candidateRow(order) {
 }
 
 function renderCandidates() {
-  const shown = candidates.filter((o) => !isOld(o.orderedAt));
+  const shown = candidates.filter((o) => !o.old);
   els.candidateList.replaceChildren(...shown.map(candidateRow));
   els.candidates.classList.remove('hidden');
   // 這一頁還有幾筆更舊的只寫個數字，讓使用者知道不是解析漏了
   els.candidateHint.textContent = shown.length === candidates.length
     ? `共 ${candidates.length} 筆`
-    : `${RECENT_DAYS} 天內 ${shown.length} 筆（這一頁共 ${candidates.length} 筆）`;
+    : `${recentDays} 天內 ${shown.length} 筆（掃過 ${candidates.length} 筆）`;
   syncControls();
 }
 
@@ -195,6 +175,8 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type !== 'SCRAPE_PROGRESS') return;
   if (msg.phase === 'lookup') {
     setProgress(`讀取詳細資料 ${msg.done} / ${msg.total}…`);
+  } else if (msg.phase === 'scan') {
+    setProgress(`讀取訂單列表…（第 ${msg.pages} 頁，${msg.orders} 筆）`);
   } else {
     setProgress(`解析頁面…（${msg.orders} 筆訂單）`);
   }
@@ -244,10 +226,13 @@ async function checkTab() {
       return;
     }
     candidates = list.orders;
+    recentDays = list.recentDays ?? recentDays;
     renderCandidates();
-    // 整頁都是舊訂單時清單會是空的，要講清楚為什麼
+    // 翻了幾頁要講出來，不然使用者會以為清單上的訂單只來自眼前這一頁
+    if (list.pages > 1) setStatus(`已就緒（${pong.label}，翻了 ${list.pages} 頁）`);
+    // 全部都是舊訂單時清單會是空的，要講清楚為什麼
     if (!els.candidateList.children.length) {
-      setStatus(`這一頁沒有 ${RECENT_DAYS} 天內的訂單（共 ${candidates.length} 筆都更舊）`, true);
+      setStatus(`沒有 ${recentDays} 天內的訂單（掃過 ${candidates.length} 筆都更舊）`, true);
     }
   } catch {
     // 注入不進去（chrome:// 等頁面），或分頁需要重新整理

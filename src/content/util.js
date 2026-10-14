@@ -54,6 +54,42 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     try { return href ? new URL(href, base).href : null; } catch { return null; }
   };
 
+  /* 下一頁的連結。各站台的分頁版面都不一樣，這裡只認最通用的三種訊號：
+   *   <a rel="next">、aria-label 是 next 之類的字、連結文字是「次へ / Next / 下一頁」
+   * 認不出來就回 null —— 那就停在目前這一頁，跟沒有分頁功能時一樣。
+   * 注意：樂天的「次へ」是 <button> 沒有 href，這個規則抓不到它 */
+  const NEXT_TEXT_RE = /^(?:次(?:へ|のページ)?|next(?:\s*page)?|下一頁|下一页|›|»)$/i;
+
+  const samePage = (a, b) => {
+    try {
+      const [x, y] = [new URL(a), new URL(b)];
+      x.hash = '';
+      y.hash = '';
+      return x.href === y.href;
+    } catch { return a === b; }
+  };
+
+  function nextPageLink(doc, pageUrl) {
+    const rel = doc.querySelector('a[rel~="next"][href]');
+    const labelled = Array.from(doc.querySelectorAll('a[href]')).find((a) =>
+      NEXT_TEXT_RE.test(clean(a.getAttribute('aria-label'))) || NEXT_TEXT_RE.test(clean(a.textContent)));
+    const url = absUrl((rel || labelled)?.getAttribute('href'), pageUrl);
+    // 連回同一頁（#、javascript:）就不算下一頁，不然會原地打轉
+    return url && !samePage(url, pageUrl) ? url : null;
+  }
+
+  /* 查詢字串帶 page=N 的站台（Shopify 的 /account?page=1）：直接加一。
+   * 猜錯也不會有事 —— 回來的若是同一頁，注文番号全部重複，上層就會停下來 */
+  function bumpPageParam(pageUrl, param = 'page') {
+    try {
+      const url = new URL(pageUrl);
+      const page = Number(url.searchParams.get(param) || 1);
+      if (!Number.isInteger(page) || page < 1) return null;
+      url.searchParams.set(param, String(page + 1));
+      return url.href;
+    } catch { return null; }
+  }
+
   /* ---------- DOM 範圍 ---------- */
 
   // 從 start 往上爬，只要父節點的 count ≤ 1 就繼續，回傳最高的那層
@@ -144,6 +180,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
   globalThis.OrderScraper.util = {
     sleep, clean, textOf, attr, all, cls, parseMoney, parseDate, absUrl,
+    nextPageLink, bumpPageParam,
     climbUnique, countContained, countMatches, outermost, byDocumentOrder,
     countOrderIds, cardsByOrderId,
     fetchDoc, readInFrame,

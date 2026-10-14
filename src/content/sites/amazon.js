@@ -9,7 +9,7 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, parseMoney, parseDate, absUrl, climbUnique,
+  const { clean, textOf, attr, all, parseMoney, parseDate, absUrl, nextPageLink, climbUnique,
     countContained, countMatches, countOrderIds, cardsByOrderId,
     outermost, byDocumentOrder } = globalThis.OrderScraper.util;
 
@@ -208,6 +208,11 @@
     label: 'Amazon.co.jp',
     isOrderPage: (loc) => /(^|\.)amazon\.co\.jp$/.test(loc.hostname) && ORDER_PAGE_RE.test(loc.pathname),
     isSignInPage: (doc, url) => /\/ap\/signin/.test(url) || !!doc.querySelector(SEL.signIn),
+    // 前端渲染，下一頁要讓瀏覽器真的跑一遍
+    nextPage: (doc, pageUrl) => {
+      const url = nextPageLink(doc, pageUrl);
+      return url ? { url, via: 'frame' } : null;
+    },
     findOrders: (doc, pageUrl) => findCards(doc).map((card) => buildOrder(card, pageUrl)),
   });
 })();
