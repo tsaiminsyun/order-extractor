@@ -9,7 +9,7 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, parseMoney } = globalThis.OrderScraper.util;
+  const { clean, textOf, attr, all, parseMoney, parseDate } = globalThis.OrderScraper.util;
 
   const SEL = {
     box: '.deliveryBox',
@@ -25,7 +25,7 @@
     tracking: '.deliveryRightClm',
   };
 
-  const LABELS = { orderId: '注文番号', total: '注文合計' };
+  const LABELS = { orderId: '注文番号', orderedAt: '注文日', total: '注文合計' };
 
   /* 已送達：出荷の表示に「（受取済）」が付く。沒有就是還在配送中。
    * 讀不到狀態時當成配送中保留 —— 漏抓在途的包裹比多抓已送達的嚴重 */
@@ -110,7 +110,14 @@
       .filter(({ shipment }) => shipment)
       .map(({ shipment, items }) => ({ ...shipment, items }));
     if (!shipments.length) return null;
-    return { orderId, total: parseMoney(valueOf(boxes[0], LABELS.total)), currency: 'JPY', shipments, lookups: [] };
+    return {
+      orderId,
+      orderedAt: parseDate(valueOf(boxes[0], LABELS.orderedAt)),
+      total: parseMoney(valueOf(boxes[0], LABELS.total)),
+      currency: 'JPY',
+      shipments,
+      lookups: [],
+    };
   }
 
   // 用頁面特徵判斷，不寫死路徑 —— 會員頁的網址可能改，版面上的這幾個記號比較穩

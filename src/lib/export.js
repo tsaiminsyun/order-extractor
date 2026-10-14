@@ -1,9 +1,9 @@
 /* 匯出工具：JSON 一個包裹一筆（含商品陣列） */
 
 /* 配送業者 / トラッキングID 屬於包裹，品名 / 数量 / 画像 屬於包裹內的商品。
- * 欄位對照：orderId 注文番号／total 合計／currency 通貨／carrier 配送業者／trackingId トラッキングID
- *           title 品名／quantity 数量／imageUrl 画像 */
-const ORDER_KEYS = ['orderId', 'total', 'currency', 'carrier', 'trackingId'];
+ * 欄位對照：orderId 注文番号／orderedAt 注文日／total 合計／currency 通貨／
+ *           carrier 配送業者／trackingId トラッキングID／title 品名／quantity 数量／imageUrl 画像 */
+const ORDER_KEYS = ['orderId', 'orderedAt', 'total', 'currency', 'carrier', 'trackingId'];
 const ITEM_KEYS = ['title', 'quantity', 'imageUrl'];
 
 // 舊版存下來的結果沒有数量欄位，當成 1 件（Amazon 的列表頁也是沒標示就等於 1 件）

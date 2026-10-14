@@ -7,7 +7,7 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, cls, absUrl, climbUnique,
+  const { clean, textOf, attr, all, cls, parseDate, absUrl, climbUnique,
     countOrderIds, cardsByOrderId, byDocumentOrder } = globalThis.OrderScraper.util;
 
   const ORDER_ID_RE = /\d{4,8}-\d{8}-\d{8,12}/;
@@ -20,10 +20,11 @@
   // 配送進度（ショップ → 出荷 → 配達店 → 配達完了）目前走到哪一步
   const ACTIVE_STEP = cls('item-shipping-active');
 
-  // 配送業者 / 伝票番号 的標籤（日 / 英）
+  // 標籤（日 / 英）。注文日的標籤自己帶冒號（「注文日：」）
   const LABELS = {
     carrier: /^(?:配送業者|shipping\s*company)$/i,
     trackingId: /^(?:伝票番号|tracking\s*number)$/i,
+    orderedAt: /^(?:注文日|order\s*date)\s*[:：]?$/i,
   };
 
   const idText = (el) => textOf(el).match(ORDER_ID_RE)?.[0] || null;
@@ -104,13 +105,17 @@
     items.forEach((item, i) => { item.quantity = byTitle.get(item.title) ?? quantities[i]?.quantity ?? 1; });
   }
 
+  // 注文日的值就在標籤的下一個元素（配送業者那組是在父層的下一個，位置不一樣）
+  const orderDate = (card) => parseDate(textOf(leafText(card, LABELS.orderedAt)[0]?.nextElementSibling));
+
   function buildOrder({ orderId, card }, baseUrl) {
     const onList = readShipments(card);
     if (hasShippingBlock(card) && !onList.length) return null;
 
     // 列表頁沒有数量，先當 1 件，讀到詳細頁再回填
     const items = findProducts(card).map(({ title, imageUrl }) => ({ title, quantity: 1, imageUrl }));
-    const order = { orderId, total: null, currency: 'JPY', shipments: toShipments(onList, items), lookups: [] };
+    const order = { orderId, orderedAt: orderDate(card), total: null, currency: 'JPY',
+      shipments: toShipments(onList, items), lookups: [] };
     // 合計只在詳細頁；英文介面的列表頁沒有配送資訊，也要靠詳細頁補
     order.lookups.push({
       url: detailUrl(card, orderId, baseUrl),

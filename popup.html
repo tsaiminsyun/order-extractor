@@ -10,7 +10,15 @@
       <p id="status" class="status">檢查分頁中…</p>
     </header>
 
-    <button id="scrape" class="primary" disabled>擷取訂單</button>
+    <section id="candidates" class="candidates hidden">
+      <div class="candidates-head">
+        <label class="select-all"><input type="checkbox" id="selectAll" /> 全選</label>
+        <span id="candidateHint" class="hint"></span>
+      </div>
+      <div id="candidateList" class="candidate-list"></div>
+    </section>
+
+    <button id="scrape" class="primary" disabled>擷取選取的訂單</button>
 
     <p id="progress" class="progress hidden"></p>
 

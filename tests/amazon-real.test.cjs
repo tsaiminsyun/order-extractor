@@ -105,7 +105,16 @@ module.exports = async function run() {
     }
   }
 
-  /* 5. 已送達的包裹不擷取 —— 送達後「配送状況を確認」按鈕還留著，光看按鈕分不出來 */
+  /* 5. 注文日：注文日（日）/ Order placed（英）/ 已下订单（簡中），寫法都不一樣 */
+  {
+    for (const lang of LANGS) {
+      const { scrape } = setup(IN_TRANSIT[lang], URL_LIST, { pages: detailPage(lang) });
+      const { orders } = await scrape();
+      c.eq(`${lang} 注文日`, orders[0]?.orderedAt, '2026-08-21');
+    }
+  }
+
+  /* 6. 已送達的包裹不擷取 —— 送達後「配送状況を確認」按鈕還留著，光看按鈕分不出來 */
   {
     for (const lang of LANGS) {
       const { scrape, asked } = setup(LIST[lang], URL_LIST, { pages: detailPage(lang) });

@@ -24,12 +24,41 @@ Chrome 擴充功能（Manifest V3），從訂單列表頁擷取配送中的訂�
      多語系商店的路徑會帶語系前綴，例如 `/zh-hant/account`、`/zh-hans/account`、`/en/account`，都支援
    - タワーレコード：會員頁的注文履歴（`tower.jp/ec/…`）。這個站台**只有列表頁、沒有注文詳細頁**，
      所以一頁就擷取得完。認的是版面特徵不是固定網址，頁面路徑改了也還能用
-2. 點擴充功能圖示（popup 會顯示目前站台），按「擷取訂單」
-3. 按「下載 JSON」（檔名會帶站台，例如 `amazon-orders-20261006-0930.json`）
+2. 點擴充功能圖示 —— popup 會列出**這一頁上的訂單**，並預設勾選**七天內下單**的那幾筆
+3. 調整勾選後按「擷取選取的 N 筆」
+4. 按「下載 JSON」（檔名會帶站台，例如 `amazon-orders-20261006-0930.json`）
 
 **只擷取目前頁面** —— 看到哪一頁就抓哪一頁，不會自動翻頁。要抓別頁就在網站上翻過去再按一次。
 
 結果會存進 `chrome.storage.local`，popup 關掉再開還看得到上次的結果。預覽表格最多顯示 100 列，下載的 JSON 不受影響。
+
+## 選要擷取哪幾筆
+
+擷取分兩步：**先列出、再擷取**。
+
+點開 popup 時只解析目前這一頁，列出每筆訂單的注文日 / 注文番号 / 合計，**不讀任何詳細頁**。
+按下按鈕之後，才去讀勾選到的那幾筆的詳細頁。
+
+這樣一來「只想抓這週的新單」就不必為了整頁訂單多發幾十個請求 ——
+ちいかわマーケット 一頁 10 筆，只勾 2 筆就只讀 2 次詳細頁。
+
+**預設勾選七天內下單的訂單**（含今天，見 [popup.js](popup.js) 的 `RECENT_DAYS`）。這只是預設值不是過濾器：
+更舊的訂單一樣會列出來，要抓自己勾就好。注文日讀不到的（少見語系）**不預設勾選**，
+但同樣列得出來 —— 不知道就別替使用者決定。
+
+已送達的訂單在看得出來的站台上根本不會進到這份清單（見下方「只擷取配送中的訂單」）。
+看不出來的站台（Shopify、楽天英文介面）就靠七天這個條件擋掉大部分 ——
+七天內下單的包裹大多還在路上。
+
+| 站台 | 注文日的來源 |
+| --- | --- |
+| Amazon | 標頭的「注文日 / Order placed / 已下订单」欄 |
+| 楽天 | 「注文日：」標籤旁的 `2026/09/18(金)` |
+| Shopify | `<time datetime="2026-10-05T14:53:07Z">`。先讀顯示的文字（商店時區的日期），認不得才用 `datetime`（UTC，凌晨下的單會差一天） |
+| タワーレコード | `.deliveryAbout` 的「注文日」欄 |
+
+各站台寫法都不一樣，一律由 [util.js](src/content/util.js) 的 `parseDate` 轉成 `YYYY-MM-DD`。
+認不得的格式回 `null`，不猜 —— 猜錯會讓使用者漏抓或多抓。
 
 ## 各站台的差異
 
@@ -95,6 +124,7 @@ Amazon 則相反，只有文字可用 —— 整個包裹區塊裡沒有任何�
 [
   {
     "orderId": "297942-20260918-0695404827",
+    "orderedAt": "2026-09-18",
     "total": 10660,
     "currency": "JPY",
     "carrier": "ヤマト運輸",
@@ -109,6 +139,7 @@ Amazon 則相反，只有文字可用 —— 整個包裹區塊裡沒有任何�
 | 欄位 | 說明 |
 | --- | --- |
 | `orderId` | 注文番号 |
+| `orderedAt` | 注文日（`YYYY-MM-DD`）。讀不到時為空字串 |
 | `total` | 整筆訂單的合計（不是這個包裹的）。讀不到時為 `null` |
 | `currency` | 固定 `JPY` |
 | `carrier` / `trackingId` | 配送業者 / 伝票番号。讀不到時為空字串 |
@@ -124,7 +155,7 @@ Amazon 則相反，只有文字可用 —— 整個包裹區塊裡沒有任何�
 | --- | --- |
 | [manifest.json](manifest.json) | MV3 設定。**沒有 background / service worker** |
 | [rules.json](rules.json) | declarativeNetRequest 規則，移除 iframe 的防嵌入標頭（見下方「另外載入的頁面」） |
-| [popup.html](popup.html) / [popup.js](popup.js) / [popup.css](popup.css) | UI：擷取按鈕、進度、預覽表格、下載 JSON |
+| [popup.html](popup.html) / [popup.js](popup.js) / [popup.css](popup.css) | UI：訂單勾選清單、擷取按鈕、進度、預覽表格、下載 JSON |
 | [src/lib/export.js](src/lib/export.js) | 整理成輸出用的欄位、產生 JSON、觸發下載 |
 
 content script 依站台拆開，共用同一套流程（manifest 依序載入）：
@@ -134,7 +165,7 @@ content script 依站台拆開，共用同一套流程（manifest 依序載入�
 | [util.js](src/content/util.js) | 共用小工具、切出訂單範圍（`climbUnique` / `cardsByOrderId`）、`fetch` 下一頁、隱藏 iframe 載入 |
 | [readers.js](src/content/readers.js) | 「要真的載入才讀得到」的頁面讀取器（Amazon 配送狀況頁 / 楽天 注文詳細頁），在隱藏 iframe 的文件上執行 |
 | [sites/amazon.js](src/content/sites/amazon.js)、[sites/rakuten.js](src/content/sites/rakuten.js)、[sites/shopify.js](src/content/sites/shopify.js)、[sites/tower.js](src/content/sites/tower.js) | 各站台的列表頁解析，回報要另外讀取哪些頁 |
-| [main.js](src/content/main.js) | 解析目前頁面、讀取詳細資料、訊息處理 |
+| [main.js](src/content/main.js) | 解析目前頁面、讀取詳細資料、訊息處理（`PING` / `PREVIEW` / `SCRAPE`） |
 
 站台轉接層的介面只有三個：`isOrderPage(loc, doc)` / `isSignInPage` / `findOrders`。
 要加新站台就多一個 `sites/*.js`，`main.js` 不用改。
@@ -336,7 +367,7 @@ fixture 清單是否齊全、fixture 有沒有混進個資。改了程式忘了�
 ## 已知限制
 
 - **只擷取目前頁面**，不會自動翻頁。訂單多的時候要自己在網站上翻頁，每頁按一次
-- Shopify 的訂單列表看不出哪些訂單有追蹤號，所以列表上的每筆訂單都要讀一次詳細頁
+- Shopify 的訂單列表看不出哪些訂單有追蹤號，所以**勾選到的**每筆訂單都要各讀一次詳細頁
 - 只擷取**配送中**的包裹。楽天的英文介面與 Shopify 讀不到送達狀態，已送達的會混進來（見「只擷取配送中的訂單」）
 - 只解析訂單列表頁與配送狀況頁 / 注文詳細頁，不會讀配送先住所、支付方式、單價
 - 另外載入的頁面一律走隱藏 iframe。站台若擋住嵌入（`x-frame-options` / `content-security-policy: frame-ancestors`）

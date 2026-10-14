@@ -50,27 +50,50 @@
 
   /* ---------- 主流程 ---------- */
 
-  async function scrape({ withLookups = true } = {}) {
+  // 解析目前這一頁，還不讀任何另外的頁面。只看使用者眼前這一頁 ——
+  // 要抓別頁就自己翻到那一頁再按一次
+  function candidates() {
     const site = currentSite();
     if (!site) throw new Error('目前頁面不是支援的訂單列表頁');
     if (site.isSignInPage(document, location.href)) {
       throw new Error('需要重新登入，請在分頁登入後再試一次');
     }
-
-    // 只看使用者眼前這一頁。要抓別頁就自己翻到那一頁再按一次
     const found = site.findOrders(document, location.href).filter(Boolean);
-
     // 同一筆注文番号在頁面上可能出現多次（桌機 / 手機版版面），只留第一筆
     const seen = new Set();
-    const orders = found.filter((o) => !seen.has(o.orderId) && seen.add(o.orderId));
+    return { site, orders: found.filter((o) => !seen.has(o.orderId) && seen.add(o.orderId)) };
+  }
+
+  /* 給 popup 勾選用的清單：只有列表頁上就看得到的欄位，不讀詳細頁。
+   * trackingIds 在 Shopify 與楽天英文介面會是空的（要讀詳細頁才知道），
+   * 所以空的不代表沒有伝票番号 —— needsLookup 為真就是「還不知道」 */
+  const summarize = (order) => ({
+    orderId: order.orderId,
+    orderedAt: order.orderedAt ?? null,
+    total: order.total ?? null,
+    currency: order.currency,
+    trackingIds: order.shipments.map((s) => s.trackingId).filter(Boolean),
+    itemCount: order.shipments.reduce((n, s) => n + s.items.length, 0),
+    needsLookup: order.lookups.length > 0,
+  });
+
+  function preview() {
+    const { site, orders } = candidates();
+    return { ok: true, site: site.name, label: site.label, orders: orders.map(summarize) };
+  }
+
+  // orderIds：popup 勾選的那幾筆。沒指定就全部擷取
+  async function scrape({ withLookups = true, orderIds = null } = {}) {
+    const { site, orders: found } = candidates();
+    const orders = orderIds ? found.filter((o) => orderIds.includes(o.orderId)) : found;
     progress({ phase: 'parsed', orders: orders.length });
 
     if (withLookups && orders.length) await runLookups(orders);
 
     // 一個包裹一筆：同一筆訂單有多個包裹時，注文番号與合計會重複出現
-    const entries = orders.flatMap(({ orderId, total, currency, shipments }) =>
+    const entries = orders.flatMap(({ orderId, orderedAt, total, currency, shipments }) =>
       shipments.map(({ carrier, trackingId, items }) =>
-        ({ orderId, total, currency, carrier, trackingId, items })));
+        ({ orderId, orderedAt, total, currency, carrier, trackingId, items })));
 
     const result = {
       ok: true,
@@ -100,6 +123,13 @@
         });
         return false;
       }
+      case 'PREVIEW':
+        try {
+          sendResponse(preview());
+        } catch (err) {
+          sendResponse({ ok: false, error: String(err?.message || err) });
+        }
+        return false;
       case 'SCRAPE':
         scrape(msg.payload)
           .then(sendResponse)

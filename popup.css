@@ -74,6 +74,44 @@ button.primary:hover:not(:disabled) {
   border-color: var(--accent-light);
 }
 
+/* 擷取前的訂單清單：勾哪幾筆由使用者決定 */
+.candidates { margin-bottom: 10px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+
+.candidates-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-weak);
+}
+
+.select-all { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+.hint { font-size: 11px; color: var(--muted); }
+
+.candidate-list { max-height: 200px; overflow: auto; }
+
+.candidate {
+  display: grid;
+  grid-template-columns: auto 78px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.candidate:last-child { border-bottom: none; }
+.candidate:hover { background: var(--accent-weak); }
+
+/* 預設勾選（七天內）的日期標出來，一眼看得出為什麼被勾 */
+.c-date.recent { color: var(--accent-strong); font-weight: 600; }
+.c-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c-total, .c-note { white-space: nowrap; }
+.muted { color: var(--muted); }
+
 .progress { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
 
 .result { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }

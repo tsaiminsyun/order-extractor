@@ -129,7 +129,12 @@ module.exports = async function run() {
     c.eq('都沒有数量 → 1 件', (await read(noQty))[0]?.items[0]?.quantity, 1);
   }
 
-  /* 8. PING 回報站台；不是會員頁就不該認得 */
+  /* 8. 注文日：「注文日：2026/10/08」 */
+  {
+    c.eq('注文日', (await read(LIST))[0]?.orderedAt, '2026-10-08');
+  }
+
+  /* 9. PING 回報站台；不是會員頁就不該認得 */
   {
     const { ping } = setup(page(LIST), URL_LIST);
     const pong = await ping();

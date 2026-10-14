@@ -13,12 +13,13 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, parseMoney, absUrl, climbUnique, countMatches } = globalThis.OrderScraper.util;
+  const { clean, textOf, attr, all, parseMoney, parseDate, absUrl, climbUnique, countMatches } = globalThis.OrderScraper.util;
 
   const SEL = {
     orderTable: 'table.order-history',
     orderLink: 'a[href*="/account/orders/"]',
     total: 'td[headers~="ColumnTotal"]',
+    time: 'time[datetime]',
     signIn: 'form[action*="/account/login"]',
   };
 
@@ -81,8 +82,17 @@
     return [...byTracking.values()];
   }
 
+  /* 注文日：<time datetime="2026-10-05T14:53:07Z">2026年10月5日</time>，兩種佈景主題都有。
+   * 先讀顯示的文字（那是商店所在時區的日期），認不得才退回 datetime —— datetime 是 UTC，
+   * 日本時間凌晨下的單換算成 UTC 會變成前一天 */
+  const orderDate = (card) => {
+    const el = card.querySelector(SEL.time);
+    return parseDate(textOf(el)) ?? parseDate(attr(el, 'datetime'));
+  };
+
   function buildOrder({ orderId, href, card }, baseUrl) {
-    const order = { orderId, total: orderTotal(card), currency: 'JPY', shipments: [], lookups: [] };
+    const order = { orderId, orderedAt: orderDate(card), total: orderTotal(card),
+      currency: 'JPY', shipments: [], lookups: [] };
     order.lookups.push({
       url: absUrl(href, baseUrl),
       reader: 'shopifyOrder',

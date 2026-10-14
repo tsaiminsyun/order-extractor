@@ -208,7 +208,15 @@ module.exports = async function run() {
     c.eq('讀不到詳細頁 → 数量 1 件', [...new Set(orders.flatMap((o) => o.items.map((i) => i.quantity)))], [1]);
   }
 
-  /* 13. 已送達的訂單不擷取。使用者給的實際頁面就是這個狀態：
+  /* 13. 注文日：日文「注文日：2026/09/18(金)」、英文「Order date：2026/09/29 (Tuesday)」 */
+  {
+    const jp = await setup(page(LIST.jp), URL_LIST, { pages: detailPage('jp') }).scrape();
+    c.eq('日文介面的注文日', [...new Set(jp.orders.map((o) => o.orderedAt))], ['2026-09-18']);
+    const en = await setup(page(LIST.en), URL_LIST, { pages: detailPage('en') }).scrape();
+    c.eq('英文介面的注文日', en.orders[0]?.orderedAt, '2026-09-29');
+  }
+
+  /* 14. 已送達的訂單不擷取。使用者給的實際頁面就是這個狀態：
    *     3 個伝票番号都在，但配送進度停在最後一步 */
   {
     const { scrape, asked } = setup(page(DELIVERED.list), URL_LIST, { pages: detailPage('jp') });

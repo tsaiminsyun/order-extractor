@@ -52,6 +52,9 @@ const RAKUTEN_ORDER = '267575-20260929-0083907767';
 const amazonList = `<html><body><div class="your-orders-content-container">
 ${[1, 2].map((n) => `<div class="order-card js-order-card">
   <div class="order-header"><ul><li class="order-header__header-list-item">
+    <div class="a-row a-size-mini"><span class="a-text-caps">注文日</span></div>
+    <div class="a-row"><span class="a-size-base">2026年10月${n}日</span></div></li>
+  <li class="order-header__header-list-item">
     <div class="a-row a-size-mini"><span class="a-text-caps">合計</span></div>
     <div class="a-row"><span class="a-size-base">￥${n},000</span></div></li></ul>
     <div class="yohtmlc-order-id"><span class="a-text-caps">注文番号</span><span dir="ltr">503-000000${n}-0000001</span></div></div>
@@ -261,6 +264,25 @@ const eq = (label, actual, expected) => {
         result.orders[0].items[0].imageUrl], ['祈り、終われば', 1, 'https://cdn.tower.jp/za/l/9W/a.JPG']);
       // 擷取期間只該打那一次列表頁，沒有任何額外請求
       eq('タワー 不另外載入頁面', hits.slice(before), ['/ec/Customer/Order/List']);
+    }
+
+    // 勾選流程：先列出這一頁的訂單（不讀任何詳細頁），再只擷取勾選的那一筆
+    {
+      await page.goto(`${ORIGIN}/your-orders/orders`, { waitUntil: 'load' });
+      const { list, picked } = await driver.evaluate(async (u) => {
+        const [tab] = await chrome.tabs.query({ url: u });
+        const found = await chrome.tabs.sendMessage(tab.id, { type: 'PREVIEW' });
+        const one = await chrome.tabs.sendMessage(tab.id, {
+          type: 'SCRAPE', payload: { orderIds: [found.orders[1].orderId] },
+        });
+        return { list: found, picked: one };
+      }, `${ORIGIN}/your-orders/orders`);
+
+      console.log(`勾選流程：列出 ${list.orders.length} 筆 → 擷取 ${picked.orders.length} 筆`);
+      eq('PREVIEW 列出兩筆', list.orders.map((o) => o.orderId), ['503-0000001-0000001', '503-0000002-0000001']);
+      eq('PREVIEW 帶注文日', list.orders.map((o) => o.orderedAt), ['2026-10-01', '2026-10-02']);
+      eq('只擷取勾選的那一筆', picked.orders.map((o) => o.orderId), ['503-0000002-0000001']);
+      eq('輸出帶注文日', picked.orders[0].orderedAt, '2026-10-02');
     }
 
     // 只用 iframe，任何情況都不該開新分頁

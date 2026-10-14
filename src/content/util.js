@@ -22,6 +22,34 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     return m ? Number(m[1].replace(/,/g, '')) : null;
   };
 
+  /* 注文日：各站台的寫法都不一樣，一律轉成 YYYY-MM-DD。認不得就回 null，不猜 ——
+   * 日期是用來決定「七天內」的，猜錯會讓使用者漏掉或多抓訂單。
+   *   2026-10-05T14:53:07Z   Shopify 的 <time datetime>
+   *   2026/10/08、2026/09/18(金)、2026/09/29 (Tuesday)   タワーレコード / 楽天
+   *   2026年8月21日                                      Amazon 日本語 / 简体中文
+   *   August 21, 2026                                    Amazon English */
+  const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december'];
+  const ymd = (y, m, d) =>
+    (Number(m) >= 1 && Number(m) <= 12 && Number(d) >= 1 && Number(d) <= 31
+      ? `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      : null);
+
+  function parseDate(text) {
+    const str = clean(text);
+    if (!str) return null;
+    const iso = str.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (iso) return ymd(iso[1], iso[2], iso[3]);
+    const slash = str.match(/(\d{4})[/年](\d{1,2})[/月](\d{1,2})/);
+    if (slash) return ymd(slash[1], slash[2], slash[3]);
+    const named = str.match(/([A-Za-z]{3,})\s+(\d{1,2}),?\s*(\d{4})/);
+    if (named) {
+      const month = MONTHS.findIndex((name) => name.startsWith(named[1].toLowerCase().slice(0, 3)));
+      if (month >= 0) return ymd(named[3], month + 1, named[2]);
+    }
+    return null;
+  }
+
   const absUrl = (href, base) => {
     try { return href ? new URL(href, base).href : null; } catch { return null; }
   };
@@ -115,7 +143,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
   }
 
   globalThis.OrderScraper.util = {
-    sleep, clean, textOf, attr, all, cls, parseMoney, absUrl,
+    sleep, clean, textOf, attr, all, cls, parseMoney, parseDate, absUrl,
     climbUnique, countContained, countMatches, outermost, byDocumentOrder,
     countOrderIds, cardsByOrderId,
     fetchDoc, readInFrame,

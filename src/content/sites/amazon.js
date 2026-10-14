@@ -9,7 +9,7 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, parseMoney, absUrl, climbUnique,
+  const { clean, textOf, attr, all, parseMoney, parseDate, absUrl, climbUnique,
     countContained, countMatches, countOrderIds, cardsByOrderId,
     outermost, byDocumentOrder } = globalThis.OrderScraper.util;
 
@@ -41,6 +41,8 @@
   const BUTTON_TEXT_RE = /^(?:配送状況を確認|Track package|追踪您的包裹|もう一度買う|Buy it again|再次购买)/i;
   // 合計的標籤：合計（日）/ Total（英）/ 总价（簡中）
   const TOTAL_LABEL_RE = /合計|total|总价/i;
+  // 注文日的標籤：注文日（日）/ Order placed（英）/ 已下订单（簡中）
+  const DATE_LABEL_RE = /注文日|order\s*placed|已下订单/i;
   const ORDER_PAGE_RE = /\/(gp\/css\/order-history|your-orders|gp\/your-account\/order-history)/;
   /* 已送達的包裹狀態文字（日 / 英 / 簡中）。送達後「配送状況を確認」按鈕還會留著好一陣子，
    * 光看按鈕分不出在途或已送達，只能讀包裹的狀態文字。
@@ -72,6 +74,14 @@
     const labeled = cols.find((c) => TOTAL_LABEL_RE.test(textOf(c.querySelector(SEL.headerLabel))));
     // 認不得標籤時（少見語系），退回標頭裡第一個含金額的欄位
     return parseMoney(textOf(labeled)) ?? parseMoney(textOf(cols.find((c) => parseMoney(textOf(c)))));
+  }
+
+  // 注文日。認不得標籤時退回標頭裡第一個解析得出日期的欄位
+  // （合計 / お届け先 / 注文番号 都不會被當成日期）
+  function orderDate(card) {
+    const cols = all(card, SEL.headerItem);
+    const labeled = cols.find((c) => DATE_LABEL_RE.test(textOf(c.querySelector(SEL.headerLabel))));
+    return parseDate(textOf(labeled)) ?? cols.map((c) => parseDate(textOf(c))).find(Boolean) ?? null;
   }
 
   /* ---------- 商品 ---------- */
@@ -178,6 +188,7 @@
 
     return {
       orderId,
+      orderedAt: orderDate(card),
       total: orderTotal(card),
       currency: 'JPY',
       shipments: [...byUrl.values()],

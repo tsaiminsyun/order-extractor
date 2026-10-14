@@ -155,7 +155,28 @@ module.exports = async function run() {
     c.eq('伝票番号不變', orders[0]?.trackingId, '510965337234');
   }
 
-  /* 9. 詳細頁全部讀不到時不輸出半筆（寧可留空也不要錯的資料） */
+  /* 9. 注文日：<time datetime>（兩種佈景主題都有），以及只擷取勾選的那幾筆 */
+  {
+    const s = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: serve(DAWN, DAWN_TOKEN) });
+    const site = globalThis.OrderScraper.sites.find((x) => x.name === 'shopify');
+    const dates = site.findOrders(globalThis.document, `${DAWN.shop}/account`).map((o) => o.orderedAt);
+    c.eq('Dawn 的注文日', dates.slice(0, 3), ['2026-10-05', '2026-09-28', '2026-09-21']);
+
+    const custom = setup(page(CUSTOM.list), `${CUSTOM.shop}/account`, { pages: serve(CUSTOM, CUSTOM_TOKEN) });
+    const customSite = globalThis.OrderScraper.sites.find((x) => x.name === 'shopify');
+    c.eq('客製主題的注文日',
+      customSite.findOrders(globalThis.document, `${CUSTOM.shop}/account`).map((o) => o.orderedAt).slice(0, 2),
+      ['2024-12-28', '2024-09-23']);
+    void s; void custom;
+
+    // 勾選兩筆 → 只讀那兩筆的詳細頁（沒勾選時這一頁要讀 10 次）
+    const picked = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: serve(DAWN, DAWN_TOKEN) });
+    await picked.scrape({ orderIds: ['CHIIKAWA-4099569', 'CHIIKAWA-4748541'] });
+    c.eq('只讀勾選那幾筆的詳細頁',
+      picked.asked.filter((a) => a.url.includes('/account/orders/')).length, 2);
+  }
+
+  /* 10. 詳細頁全部讀不到時不輸出半筆（寧可留空也不要錯的資料） */
   {
     const { scrape } = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: () => null });
     const { orders } = await scrape();
