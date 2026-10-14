@@ -136,7 +136,26 @@ module.exports = async function run() {
     }
   }
 
-  /* 8. 詳細頁全部讀不到時不輸出半筆（寧可留空也不要錯的資料） */
+  /* 8. 部分出貨：Shopify 的訂單狀態只有「未出貨 / 部分出貨 / 已出貨」。
+   *    部分出貨時同一張訂單裡有的商品有配送資訊、有的沒有 —— 只輸出出了貨的那些。
+   *    合計仍是整筆訂單的合計（輸出格式本來就是「一個包裹一筆，合計重複出現」） */
+  {
+    // 實際頁面是三件商品同一個伝票番号；把第一件的配送資訊拿掉就是部分出貨
+    const partial = DAWN.order.replace(/<div class="fulfillment">[^]*?<\/div>\s*<\/div>/, '</div>');
+    c.eq('確實少了一組配送資訊',
+      (partial.match(/510965337234/g) || []).length, (DAWN.order.match(/510965337234/g) || []).length - 2);
+
+    const { scrape } = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: serve({ order: partial }, DAWN_TOKEN) });
+    const { orders } = await scrape();
+    c.eq('那件商品仍然印在訂單頁上', partial.includes('島二郎'), true);
+    c.eq('部分出貨 → 只輸出出了貨的商品', orders[0]?.items.length, 2);
+    c.eq('沒出貨的那件不在裡面',
+      orders[0]?.items.some((i) => i.title.includes('島二郎')), false);
+    c.eq('合計仍是整筆訂單的合計', orders[0]?.total, 3410);
+    c.eq('伝票番号不變', orders[0]?.trackingId, '510965337234');
+  }
+
+  /* 9. 詳細頁全部讀不到時不輸出半筆（寧可留空也不要錯的資料） */
   {
     const { scrape } = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: () => null });
     const { orders } = await scrape();

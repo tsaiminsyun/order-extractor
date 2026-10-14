@@ -1,6 +1,6 @@
 {
   "name": "order-scraper-extension",
-  "version": "0.17.2",
+  "version": "0.17.3",
   "private": true,
   "description": "Amazon.co.jp / 楽天 / Shopify / タワーレコード 訂單擷取 Chrome 擴充功能",
   "scripts": {
