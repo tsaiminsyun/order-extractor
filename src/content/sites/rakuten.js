@@ -20,11 +20,13 @@
   // 配送進度（ショップ → 出荷 → 配達店 → 配達完了）目前走到哪一步
   const ACTIVE_STEP = cls('item-shipping-active');
 
-  // 標籤（日 / 英）。注文日的標籤自己帶冒號（「注文日：」）
+  /* 標籤（日 / 英）。標籤後面可能什麼都沒有（值在隔壁元素），也可能直接接冒號跟值
+   * （「注文番号：297942-…」）。兩種都要認，但「配送業者を変更」這種就不能算 */
+  const labelRe = (words) => new RegExp(`^(?:${words})(?:\\s*[:：]|\\s*$)`, 'i');
   const LABELS = {
-    carrier: /^(?:配送業者|shipping\s*company)$/i,
-    trackingId: /^(?:伝票番号|tracking\s*number)$/i,
-    orderedAt: /^(?:注文日|order\s*date)\s*[:：]?$/i,
+    carrier: labelRe('配送業者|shipping\\s*company'),
+    trackingId: labelRe('伝票番号|tracking\\s*number'),
+    orderedAt: labelRe('注文日|order\\s*date'),
   };
 
   const idText = (el) => textOf(el).match(ORDER_ID_RE)?.[0] || null;
@@ -76,10 +78,23 @@
     return !!active && active === active.parentElement?.lastElementChild;
   };
 
+  /* 標籤與值的相對位置樂天改過：
+   *   <div><span>標籤</span></div><div>值</div>   舊版：兩邊各包一層 div
+   *   <span>標籤</span><span>值</span>            新版：改用 flex gap，少了那層 div
+   *   <span>標籤：值</span>                        合併在同一個元素裡
+   * 三種依序試，取第一個有東西的 */
+  const valueNextTo = (label) => {
+    if (!label) return '';
+    // 冒號後面已經有東西就是合併寫法，直接用 —— 這種情況下往外找會撈到隔壁的欄位
+    const merged = clean(textOf(label).match(/[:：]\s*(.+)$/)?.[1] || '');
+    return merged
+      || textOf(label.nextElementSibling)
+      || textOf(label.parentElement?.nextElementSibling);
+  };
+
   // 配送業者 / 伝票番号 的標籤旁邊就是值，可能有多組
   function shipmentsIn(scope) {
-    const valuesOf = (labelRe) =>
-      leafText(scope, labelRe).map((el) => textOf(el.parentElement?.nextElementSibling)).filter(Boolean);
+    const valuesOf = (re) => leafText(scope, re).map(valueNextTo).filter(Boolean);
     const carriers = valuesOf(LABELS.carrier);
     return valuesOf(LABELS.trackingId).map((trackingId, i) => ({ carrier: carriers[i] || carriers[0] || '', trackingId }));
   }
@@ -111,8 +126,7 @@
     items.forEach((item, i) => { item.quantity = byTitle.get(item.title) ?? quantities[i]?.quantity ?? 1; });
   }
 
-  // 注文日的值就在標籤的下一個元素（配送業者那組是在父層的下一個，位置不一樣）
-  const orderDate = (card) => parseDate(textOf(leafText(card, LABELS.orderedAt)[0]?.nextElementSibling));
+  const orderDate = (card) => parseDate(valueNextTo(leafText(card, LABELS.orderedAt)[0]));
 
   function buildOrder({ orderId, card }, baseUrl) {
     const onList = readShipments(card);

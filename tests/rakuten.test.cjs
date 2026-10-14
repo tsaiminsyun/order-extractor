@@ -216,22 +216,56 @@ module.exports = async function run() {
     c.eq('英文介面的注文日', en.orders[0]?.orderedAt, '2026-09-29');
   }
 
-  /* 14. 注文番号的標籤有兩種寫法，兩種都要認得：
-   *     舊版：<span>297942-20260918-0695404827</span>
-   *     新版：<span>注文番号：297942-20260918-0695404827</span>（標籤併進同一個 span）
-   *     這裡把實際頁面改成新版的寫法，結果要完全一樣 */
+  /* 14. 樂天改版後的三處差異，結果都要跟改版前一樣。
+   *     改法取自使用者後來提供的實際頁面（tmp/rakuten/rakuten-list-jp.html）：
+   *       a. 注文番号：<span>297942-…</span> → <span>注文番号：297942-…</span>（標籤併進同一個 span）
+   *       b. 注文日：  <span>注文日：</span><span>2026/09/18(金)</span> → 併成一個 span
+   *       c. 伝票番号：<div><span>標籤</span></div><div><span>值</span></div>
+   *                    → <span>標籤</span><span>值</span>（改用 flex gap，少了外面那層 div）
+   *     三處都只動 DOM 結構，文字內容原封不動 */
   {
-    const dom = new JSDOM(page(LIST.jp));
-    const ids = [...dom.window.document.querySelectorAll('span')]
-      .filter((el) => !el.children.length && /^\d{4,8}-\d{8}-\d{8,12}$/.test(el.textContent.trim()));
-    c.eq('實際頁面上是舊版寫法', ids.length > 0, true);
-    for (const el of ids) el.textContent = `注文番号：${el.textContent.trim()}`;
+    const ID_RE = /^\d{4,8}-\d{8}-\d{8,12}$/;
+    const leaves = (doc) => [...doc.querySelectorAll('span')].filter((el) => !el.children.length);
 
-    const { scrape } = setup(dom.serialize(), URL_LIST, { pages: detailPage('jp') });
-    const { orders } = await scrape();
+    const newLayout = (body) => {
+      const dom = new JSDOM(page(body));
+      const doc = dom.window.document;
+
+      // a. 注文番号的標籤併進同一個 span
+      const ids = leaves(doc).filter((el) => ID_RE.test(el.textContent.trim()));
+      for (const el of ids) el.textContent = `注文番号：${el.textContent.trim()}`;
+
+      // b. 注文日的標籤與值併成一個 span
+      for (const el of leaves(doc).filter((e) => /^注文日\s*[:：]$/.test(e.textContent.trim()))) {
+        const value = el.nextElementSibling;
+        if (!value) continue;
+        el.textContent = `注文日：${value.textContent.trim()}`;
+        value.remove();
+      }
+
+      // c. 配送業者 / 伝票番号：把標籤與值從各自的 div 裡拉出來變成兄弟
+      for (const el of leaves(doc).filter((e) => /^(?:配送業者|伝票番号)$/.test(e.textContent.trim()))) {
+        const labelBox = el.parentElement;
+        const valueBox = labelBox?.nextElementSibling;
+        const value = valueBox?.querySelector('span, a');
+        if (!value) continue;
+        labelBox.replaceWith(el, value);
+        valueBox.remove();
+      }
+      return { html: dom.serialize(), ids: ids.length };
+    };
+
+    const { html, ids } = newLayout(LIST.jp);
+    c.eq('實際頁面上確實是舊版寫法', ids > 0, true);
+    c.eq('改造後沒有殘留舊版的標籤格子', /<span[^>]*>伝票番号<\/span><\/div>/.test(html), false);
+
+    const after = await setup(html, URL_LIST, { pages: detailPage('jp') }).scrape();
     const before = await setup(page(LIST.jp), URL_LIST, { pages: detailPage('jp') }).scrape();
-    c.eq('標籤併進同一個 span 也認得', orders.map((o) => [o.orderId, o.trackingId]),
-      before.orders.map((o) => [o.orderId, o.trackingId]));
+    c.eq('新版版面讀到一樣的注文番号 / 伝票番号',
+      after.orders.map((o) => [o.orderId, o.carrier, o.trackingId]),
+      before.orders.map((o) => [o.orderId, o.carrier, o.trackingId]));
+    c.eq('新版版面讀到一樣的注文日',
+      [...new Set(after.orders.map((o) => o.orderedAt))], ['2026-09-18']);
   }
 
   /* 15. 已送達的訂單不擷取。使用者給的實際頁面就是這個狀態：
