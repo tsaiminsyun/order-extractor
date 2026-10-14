@@ -80,7 +80,6 @@ button.primary:hover:not(:disabled) {
 .candidates-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--line);
@@ -88,7 +87,19 @@ button.primary:hover:not(:disabled) {
 }
 
 .select-all { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
-.hint { font-size: 11px; color: var(--muted); }
+.hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+/* 「顯示全部 / 只看 N 天內」：只有真的藏了東西時才出現 */
+button.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  font-size: 11px;
+  text-decoration: underline;
+}
+
+button.link:hover:not(:disabled) { background: none; border: none; }
 
 .candidate-list { max-height: 200px; overflow: auto; }
 

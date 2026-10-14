@@ -29,8 +29,8 @@ module.exports = async function run() {
     c.eq('等渲染上限 15 秒', [md.includes('上限 15 秒'), readers.includes('RENDER_TIMEOUT_MS = 15000')], [true, true]);
     c.eq('部分欄位再等 2 秒', [md.includes('再等 2 秒'), readers.includes('PARTIAL_WAIT_MS = 2000')], [true, true]);
     c.eq('預覽上限 100 列', [md.includes('最多顯示 100 列'), read('popup.js').includes('PREVIEW_LIMIT = 100')], [true, true]);
-    c.eq('預設勾選七天內', [
-      md.includes('預設勾選七天內下單的訂單'),
+    c.eq('只列七天內', [
+      md.includes('只列出七天內下單的訂單'),
       read('popup.js').includes('RECENT_DAYS = 7'),
     ], [true, true]);
     c.eq('只擷取配送中的訂單', [

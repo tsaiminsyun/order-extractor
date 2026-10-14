@@ -20,6 +20,7 @@ const els = {
   candidates: $('candidates'),
   candidateList: $('candidateList'),
   candidateHint: $('candidateHint'),
+  toggleOld: $('toggleOld'),
   selectAll: $('selectAll'),
   scrape: $('scrape'),
   progress: $('progress'),
@@ -29,6 +30,8 @@ const els = {
 };
 
 let lastResult = null;
+let candidates = [];   // 這一頁上的全部訂單
+let showOld = false;   // 預設不列出七天前的訂單
 
 /* ---------- 小工具 ---------- */
 
@@ -69,6 +72,9 @@ const isRecent = (orderedAt) => {
   const days = daysAgo(orderedAt);
   return days >= 0 && days < RECENT_DAYS;
 };
+
+// 「舊」要有日期才算得出來。日期不明的不當成舊的，照樣列出來 —— 不知道就不要默默藏起來
+const isOld = (orderedAt) => orderedAt != null && daysAgo(orderedAt) >= RECENT_DAYS;
 
 /* ---------- 分頁 ---------- */
 
@@ -130,13 +136,26 @@ function candidateRow(order) {
   return row;
 }
 
-function renderCandidates(orders) {
-  els.candidateList.replaceChildren(...orders.map(candidateRow));
+function renderCandidates() {
+  const hidden = candidates.filter((o) => isOld(o.orderedAt)).length;
+  const shown = showOld ? candidates : candidates.filter((o) => !isOld(o.orderedAt));
+
+  els.candidateList.replaceChildren(...shown.map(candidateRow));
   els.candidates.classList.remove('hidden');
-  const recent = orders.filter((o) => isRecent(o.orderedAt)).length;
-  els.candidateHint.textContent = `共 ${orders.length} 筆，已勾選 ${RECENT_DAYS} 天內的 ${recent} 筆`;
+  // 藏了東西就說清楚藏了幾筆，不要讓使用者以為訂單不見了
+  els.candidateHint.textContent = hidden
+    ? `${shown.length} / ${candidates.length} 筆${showOld ? '' : `（隱藏 ${hidden} 筆更舊的）`}`
+    : `共 ${candidates.length} 筆`;
+  // 這一頁本來就沒有更舊的訂單時，切換鈕不必出現
+  els.toggleOld.classList.toggle('hidden', !hidden);
+  els.toggleOld.textContent = showOld ? `只看 ${RECENT_DAYS} 天內` : '顯示全部';
   syncControls();
 }
+
+els.toggleOld.addEventListener('click', () => {
+  showOld = !showOld;
+  renderCandidates();
+});
 
 els.selectAll.addEventListener('change', () => {
   boxes().forEach((b) => { b.checked = els.selectAll.checked; });
@@ -233,7 +252,12 @@ async function checkTab() {
       setStatus(`這一頁沒有可擷取的訂單（${pong.label}）`, true);
       return;
     }
-    renderCandidates(list.orders);
+    candidates = list.orders;
+    renderCandidates();
+    // 整頁都是舊訂單時清單會是空的，要講清楚為什麼（按「顯示全部」仍叫得出來）
+    if (!els.candidateList.children.length) {
+      setStatus(`這一頁沒有 ${RECENT_DAYS} 天內的訂單（共 ${candidates.length} 筆都更舊）`, true);
+    }
   } catch {
     // 注入不進去（chrome:// 等頁面），或分頁需要重新整理
     setStatus('這個分頁無法擷取，請開啟訂單紀錄頁後重試', true);
