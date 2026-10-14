@@ -216,13 +216,28 @@ module.exports = async function run() {
     c.eq('擷取的就是那一筆', [...new Set(picked.orders.map((o) => o.orderId))], [second]);
     c.eq('伝票番号正確', picked.orders[0]?.trackingId, '510965337234');
 
-    // 第 2 頁整頁都超過七天 → 不必再往下翻（列表是新到舊排的）
+    // 第 2 頁出現超過七天的訂單 → 不必再往下翻（列表是新到舊排的）
     const stale = renumber(dated(DAWN.list, ymd(30)), 'CHIIKAWA-4', 'CHIIKAWA-8');
     const stop = setup(page(p1), `${DAWN.shop}/account?page=1`, { pages: serveList({ 2: stale }) });
     const stopped = await stop.preview();
-    c.eq('整頁都超過七天就停在那一頁', stopped.pages, 2);
+    c.eq('看到超過七天的就停在那一頁', stopped.pages, 2);
     c.eq('沒有再去要第 3 頁', stop.asked.map((a) => new URL(a.url).searchParams.get('page')), ['2']);
     c.eq('舊訂單有被標記起來', stopped.orders.filter((o) => o.old).length, 10);
+
+    /* 第 1 頁就跨過七天的界線 → 連第 2 頁都不該去載。
+     * 這是最常見的情況：一頁 10 筆，七天內通常只佔前面幾筆 */
+    const mixed = (() => {
+      const html = dated(DAWN.list, ymd(1));
+      const old = `<time datetime="${ymd(30)}T00:00:00Z">${ymd(30)}</time>`;
+      const start = html.lastIndexOf('<time');
+      return html.slice(0, start) + old + html.slice(html.indexOf('</time>', start) + '</time>'.length);
+    })();
+    const early = setup(page(mixed), `${DAWN.shop}/account?page=1`, { pages: serveList({ 2: p2 }) });
+    const stoppedEarly = await early.preview();
+    c.eq('第一頁就看到超過七天的 → 不載下一頁', stoppedEarly.pages, 1);
+    c.eq('完全沒有多發請求', early.asked.length, 0);
+    c.eq('這一頁的訂單仍然全部掃到', stoppedEarly.orders.length, 10);
+    c.eq('其中一筆被標成舊的', stoppedEarly.orders.filter((o) => o.old).length, 1);
   }
 
   /* 11. 詳細頁全部讀不到時不輸出半筆（寧可留空也不要錯的資料） */

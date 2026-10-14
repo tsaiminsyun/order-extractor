@@ -92,7 +92,7 @@
 
   /* 從使用者眼前這一頁開始往後翻，直到：
    *   - 沒有下一頁的連結（或站台沒有實作）
-   *   - 整頁訂單都超過七天（列表是新到舊排的，再往後只會更舊）
+   *   - 這一頁出現超過七天的訂單（列表是新到舊排的，再往後只會更舊）
    *   - 翻到的頁面沒有新的注文番号（重複或空頁）
    *   - 到達 MAX_PAGES
    * 翻頁失敗不算錯誤：把已經掃到的交出去就好。
@@ -122,7 +122,8 @@
       kept.push(...fresh);
       progress({ phase: 'scan', pages, orders: kept.filter((o) => !isOld(o.orderedAt)).length });
 
-      if (fresh.length && fresh.every((o) => isOld(o.orderedAt))) break;
+      // 看到第一筆超過七天的就不再往下翻 —— 列表是新到舊排的，下一頁只會更舊
+      if (fresh.some((o) => isOld(o.orderedAt))) break;
       if (!fresh.length && pages > 1) break;
       if (!page.next) break;
       if (pages >= MAX_PAGES) { atPageCap = true; break; }

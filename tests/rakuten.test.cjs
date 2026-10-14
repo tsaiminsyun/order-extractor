@@ -216,7 +216,25 @@ module.exports = async function run() {
     c.eq('英文介面的注文日', en.orders[0]?.orderedAt, '2026-09-29');
   }
 
-  /* 14. 已送達的訂單不擷取。使用者給的實際頁面就是這個狀態：
+  /* 14. 注文番号的標籤有兩種寫法，兩種都要認得：
+   *     舊版：<span>297942-20260918-0695404827</span>
+   *     新版：<span>注文番号：297942-20260918-0695404827</span>（標籤併進同一個 span）
+   *     這裡把實際頁面改成新版的寫法，結果要完全一樣 */
+  {
+    const dom = new JSDOM(page(LIST.jp));
+    const ids = [...dom.window.document.querySelectorAll('span')]
+      .filter((el) => !el.children.length && /^\d{4,8}-\d{8}-\d{8,12}$/.test(el.textContent.trim()));
+    c.eq('實際頁面上是舊版寫法', ids.length > 0, true);
+    for (const el of ids) el.textContent = `注文番号：${el.textContent.trim()}`;
+
+    const { scrape } = setup(dom.serialize(), URL_LIST, { pages: detailPage('jp') });
+    const { orders } = await scrape();
+    const before = await setup(page(LIST.jp), URL_LIST, { pages: detailPage('jp') }).scrape();
+    c.eq('標籤併進同一個 span 也認得', orders.map((o) => [o.orderId, o.trackingId]),
+      before.orders.map((o) => [o.orderId, o.trackingId]));
+  }
+
+  /* 15. 已送達的訂單不擷取。使用者給的實際頁面就是這個狀態：
    *     3 個伝票番号都在，但配送進度停在最後一步 */
   {
     const { scrape, asked } = setup(page(DELIVERED.list), URL_LIST, { pages: detailPage('jp') });

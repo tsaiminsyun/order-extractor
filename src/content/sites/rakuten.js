@@ -28,8 +28,14 @@
   };
 
   const idText = (el) => textOf(el).match(ORDER_ID_RE)?.[0] || null;
-  // 只取「整個元素就是注文番号」的 span 當錨點，避免抓到外層容器
-  const exactId = (el) => (idText(el) === textOf(el) ? idText(el) : null);
+  /* 標籤有時跟號碼寫在同一個 span（「注文番号：297942-…」），有時分開（只有號碼）——
+   * 兩種實際頁面都看過。去掉標籤之後整個元素剛好就是注文番号，才當成錨點；
+   * 這樣才不會抓到包著一整張卡片的外層容器 */
+  const ID_LABEL_RE = /^\s*(?:注文番号|order\s*number)\s*[:：]?\s*/i;
+  const exactId = (el) => {
+    const text = clean(textOf(el).replace(ID_LABEL_RE, ''));
+    return text && text === text.match(ORDER_ID_RE)?.[0] ? text : null;
+  };
   const countIds = countOrderIds('span, div', idText);
   // 只有一層文字的元素才可能是標籤
   const leafText = (card, labelRe) => all(card, 'span').filter((el) => !el.children.length && labelRe.test(textOf(el)));
