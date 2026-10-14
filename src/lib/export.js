@@ -21,12 +21,14 @@ export function exportOrders(orders) {
 export const ordersToJson = (orders) => JSON.stringify(exportOrders(orders), null, 2);
 
 export function downloadText(filename, text, mime = 'application/json') {
-  const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
+  // 用建立網址的那個 URL 物件回收，五秒後才執行時不要再去找全域的 URL
+  const api = URL;
+  const url = api.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  setTimeout(() => api.revokeObjectURL(url), 5000);
 }
 
 export function stamp(d = new Date()) {

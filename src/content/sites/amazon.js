@@ -160,7 +160,7 @@
   // 只保留配送中的商品：包裹要有「配送状況を確認」按鈕（尚未出貨的沒有），
   // 而且狀態不是已送達。兩個條件都不符的包裹整個略過。
   // 一個包裹一筆，配送業者 / トラッキングID 由配送狀況頁補上。
-  // 完全沒有配送中的包裹時回傳 null（整筆訂單不擷取）
+  // 完全沒有配送中的包裹時回傳空的訂單 —— 不擷取，但注文日要留著給翻頁判斷七天的界線
   function buildOrder({ orderId, card, products }, baseUrl) {
     const shipments = findShipments(card);
     // 先把商品配對到包裹，再濾掉已送達的那些 —— 順序不能反過來：
@@ -170,7 +170,9 @@
       .filter(({ shipment }) => shipment && !isDelivered(shipment.el))
       .map(({ product, shipment }) => ({ product, trackingUrl: absUrl(shipment.trackHref, baseUrl) }))
       .filter(({ trackingUrl }) => trackingUrl);
-    if (!shipping.length) return null;
+    if (!shipping.length) {
+      return { orderId, orderedAt: orderDate(card), total: orderTotal(card), currency: 'JPY', shipments: [], lookups: [] };
+    }
 
     const scope = { card, imgs: all(card, 'img'), productEls: products.map((p) => p.el) };
     // 同一個包裹的商品歸成一筆，也只讀一次配送狀況頁

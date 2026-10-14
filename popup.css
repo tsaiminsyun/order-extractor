@@ -27,8 +27,9 @@
 
 * { box-sizing: border-box; }
 
+/* 表格有五欄，tracking ID 是最重要的那欄，不能被切掉 —— Chrome 的 popup 最寬可以到 800px */
 body {
-  width: 420px;
+  width: 560px;
   margin: 0;
   padding: 14px;
   background: var(--bg);
@@ -74,57 +75,44 @@ button.primary:hover:not(:disabled) {
   border-color: var(--accent-light);
 }
 
-/* 擷取前的訂單清單：勾哪幾筆由使用者決定 */
-.candidates { margin-bottom: 10px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.muted { color: var(--muted); }
 
-.candidates-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line);
-  background: var(--accent-weak);
-}
+.progress { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
 
+.result { margin-top: 4px; }
+
+/* 全選 + 筆數 */
+.result-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .select-all { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
 .hint { margin-left: auto; font-size: 11px; color: var(--muted); }
 
-.candidate-list { max-height: 200px; overflow: auto; }
-
-.candidate {
-  display: grid;
-  grid-template-columns: auto 78px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  font-size: 11px;
-  border-bottom: 1px solid var(--line);
-  cursor: pointer;
+.preview {
+  max-height: 300px;
+  overflow: auto;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }
 
-.candidate:last-child { border-bottom: none; }
-.candidate:hover { background: var(--accent-weak); }
-
-/* 預設勾選（七天內）的日期標出來，一眼看得出為什麼被勾 */
-.c-date.recent { color: var(--accent-strong); font-weight: 600; }
-.c-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.c-total, .c-note { white-space: nowrap; }
-.muted { color: var(--muted); }
-
-.progress { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
-
-.result { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
-.actions { display: flex; gap: 6px; margin-bottom: 10px; }
-.actions button { flex: 1; }
-
-.preview { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
-
-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+/* 固定欄寬：內容再長都不會把表格撐出 popup，品名吃剩下的寬度 */
+table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; }
 th, td { padding: 5px 6px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
 /* 表頭會固定在捲動區上方，底色必須不透明 */
 th { position: sticky; top: 0; background: var(--accent-weak); color: var(--muted); font-weight: 600; }
 td.num { text-align: right; white-space: nowrap; }
-.title { display: block; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 勾選欄：窄、置中，checkbox 跟第一行文字對齊 */
+.pick { width: 26px; padding-right: 0; text-align: center; }
+.pick input { margin: 1px 0 0; }
+.c-id { width: 150px; }
+.c-total { width: 66px; }
+.c-ship { width: 136px; }
+/* 編號類的欄位：先在連字號處斷行，真的放不下才在數字中間斷 */
+td.c-id, td.c-ship { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+/* tracking ID 自己一行，不跟業者名擠在一起 */
+.ship-id { display: block; }
+/* 「（日期不明）」放在注文番号底下自己一行 */
+.c-id .muted { display: block; }
+.title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .hidden { display: none; }
 

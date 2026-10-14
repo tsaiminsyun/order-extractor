@@ -29,7 +29,7 @@ module.exports = async function run() {
     c.eq('翻頁停在七天', [md.includes('這一頁出現超過七天的訂單'), main.includes('RECENT_DAYS = 7')], [true, true]);
     c.eq('等渲染上限 15 秒', [md.includes('上限 15 秒'), readers.includes('RENDER_TIMEOUT_MS = 15000')], [true, true]);
     c.eq('部分欄位再等 2 秒', [md.includes('再等 2 秒'), readers.includes('PARTIAL_WAIT_MS = 2000')], [true, true]);
-    c.eq('預覽上限 100 列', [md.includes('最多顯示 100 列'), read('popup.js').includes('PREVIEW_LIMIT = 100')], [true, true]);
+    c.eq('表格沒有列數上限（每一列都要勾得到，下載才不會漏）', read('popup.js').includes('PREVIEW_LIMIT'), false);
     c.eq('只列七天內', [
       md.includes('只列出七天內下單的訂單'),
       // 「幾天算新」只定義在 main.js，popup 用它標好的 old / recent，不自己算日期

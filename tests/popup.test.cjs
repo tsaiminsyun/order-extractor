@@ -1,8 +1,8 @@
 /* popup：
  * - 支不支援目前的分頁，要由 content script 回答，不能用寫死的網域清單判斷
  *   （曾經因為網域清單沒有 chiikawamarket.jp，popup 連問都不問就停用擷取按鈕）
- * - 擷取前先列出這一頁的訂單讓使用者勾。**只列七天內下單的** ——
- *   這個擴充功能只要配送中的訂單，七天前下的單多半已經到貨，沒有任何方式能把它們叫出來
+ * - 一打開就整套跑完：表格上就是最終結果（注文番号 / 品名 / 合計 / 配送業者・ID），
+ *   每一列可以勾選，按「下載 JSON」只下載勾選的那幾列。中間沒有「擷取」這一步
  */
 const fs = require('fs');
 const path = require('path');
@@ -11,46 +11,37 @@ const { Check, JSDOM } = require('./harness.cjs');
 
 const ROOT = path.join(__dirname, '..');
 const POPUP_HTML = fs.readFileSync(path.join(ROOT, 'popup.html'), 'utf8');
-// popup.html 本來就有「擷取」「下載 JSON」兩顆，多出來的才是程式動態加的
-const BUILT_IN_BUTTONS = 2;
+// popup.html 本來就只有「下載 JSON」一顆按鈕，多出來的才是程式動態加的
+const BUILT_IN_BUTTONS = 1;
 
-// 以今天為基準往回數 n 天。用中午建構，避開日光節約與時區跨日
-const day = (n) => {
-  const d = new Date();
-  d.setHours(12, 0, 0, 0);
-  d.setDate(d.getDate() - n);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
-/* recent / old 是 content script（main.js）標好的，popup 不自己算日期。
- * 這裡照同一套規則產生，所以「幾天算新」改了之後，popup 不必跟著改 */
-const RECENT_DAYS = 7;
-const daysOld = (orderedAt) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((today.getTime() - Date.parse(`${orderedAt}T00:00:00`)) / 86400000);
-};
-const order = (orderId, orderedAt, extra = {}) => ({
+// content script 回傳的包裹（main.js 已經過濾成七天內、有 tracking ID 的）
+const parcel = (orderId, trackingId, extra = {}) => ({
   orderId,
-  orderedAt,
-  recent: orderedAt != null && daysOld(orderedAt) >= 0 && daysOld(orderedAt) < RECENT_DAYS,
-  old: orderedAt != null && daysOld(orderedAt) >= RECENT_DAYS,
+  orderedAt: '2026-10-12',
   total: 1000,
   currency: 'JPY',
-  trackingIds: [],
-  itemCount: 1,
-  needsLookup: true,
+  carrier: 'ヤマト運輸',
+  trackingId,
+  items: [{ title: `${orderId} の商品`, quantity: 1, imageUrl: null }],
   ...extra,
 });
 
-// popup.js 一載入就會跑 checkTab()，所以每個情境都要重新載入一次（用查詢字串避開模組快取）
+const result = (orders, extra = {}) =>
+  ({ ok: true, site: 'shopify', recentDays: 7, pages: 1, missingTracking: 0, orders, ...extra });
+
+// popup.js 一載入就會跑 start()，所以每個情境都要重新載入一次（用查詢字串避開模組快取）
 let seq = 0;
-async function openPopup({ tabUrl, pong, orders = [], pages = 1, injectFails = false, pingThrows = false, previewFails = false }) {
+async function openPopup({ tabUrl, pong, scraped, injectFails = false, pingThrows = false }) {
   const dom = new JSDOM(POPUP_HTML, { url: 'chrome-extension://test/popup.html' });
   const injected = [];
   const sent = [];
+  const downloads = [];
   let pinged = 0;
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, Node: dom.window.Node });
+  // 下載：攔下 Blob 的內容，看實際存出去的是哪幾筆
+  globalThis.URL.createObjectURL = (blob) => { downloads.push(blob); return 'blob:test'; };
+  globalThis.URL.revokeObjectURL = () => {};
+  dom.window.HTMLAnchorElement.prototype.click = function click() {};
   globalThis.chrome = {
     runtime: { getManifest: () => ({ version: 'test' }), onMessage: { addListener: () => {} } },
     tabs: {
@@ -62,12 +53,7 @@ async function openPopup({ tabUrl, pong, orders = [], pages = 1, injectFails = f
           if (pingThrows && !injected.length) throw new Error('沒有 content script');
           return pong;
         }
-        if (msg.type === 'PREVIEW') {
-          return previewFails
-            ? { ok: false, error: '解析失敗' }
-            : { ok: true, orders, pages, scanned: orders.length, recentDays: RECENT_DAYS };
-        }
-        if (msg.type === 'SCRAPE') return { ok: true, site: 'test', orders: [] };
+        if (msg.type === 'SCRAPE') return scraped;
         return undefined;
       },
     },
@@ -77,232 +63,204 @@ async function openPopup({ tabUrl, pong, orders = [], pages = 1, injectFails = f
         injected.push(...files);
       },
     },
-    storage: { local: { get: async () => ({}) } },
   };
   await import(`${pathToFileURL(path.join(ROOT, 'popup.js')).href}?v=${seq += 1}`);
-  await new Promise((r) => setTimeout(r, 0)); // 等 checkTab() 跑完
+  await new Promise((r) => setTimeout(r, 0)); // 等 start() 跑完
   const d = dom.window.document;
-  const boxes = () => [...d.querySelectorAll('#candidateList input[type="checkbox"]')];
-  const fire = (el, type = 'change') => el.dispatchEvent(new dom.window.Event(type));
+  const boxes = () => [...d.querySelectorAll('#preview tbody input[type="checkbox"]')];
+  const fire = (el) => el.dispatchEvent(new dom.window.Event('change'));
+  const downloaded = async () => JSON.parse(await downloads.at(-1).text());
   return {
-    d,
-    boxes,
-    fire,
-    scrapeBtn: d.getElementById('scrape'),
+    d, boxes, fire, sent, injected, downloads, downloaded,
+    pinged: () => pinged,
     get status() { return d.getElementById('status').textContent; },
     get isError() { return d.getElementById('status').classList.contains('error'); },
-    get scrapeEnabled() { return !d.getElementById('scrape').disabled; },
-    get scrapeLabel() { return d.getElementById('scrape').textContent; },
-    get hint() { return d.getElementById('candidateHint').textContent; },
-    get listed() { return boxes().map((b) => b.value); },
-    get checked() { return boxes().filter((b) => b.checked).map((b) => b.value); },
+    get warning() {
+      const w = d.getElementById('warning');
+      return w.classList.contains('hidden') ? '' : w.textContent;
+    },
+    get rows() { return [...d.querySelectorAll('#preview tbody tr')]; },
+    get headers() { return [...d.querySelectorAll('#preview thead th')].map((th) => th.textContent); },
+    get checked() { return boxes().filter((b) => b.checked).length; },
+    get saveBtn() { return d.getElementById('saveJson'); },
+    get resultShown() { return !d.getElementById('result').classList.contains('hidden'); },
     get extraButtons() { return d.querySelectorAll('button').length - BUILT_IN_BUTTONS; },
-    sent, injected, pinged,
   };
 }
 
 const SHOPIFY = { ok: true, onOrderPage: true, site: 'shopify', label: 'Shopify 商店' };
-const TOWER = { ok: true, onOrderPage: true, site: 'tower', label: 'タワーレコード' };
 
 module.exports = async function run() {
   const c = new Check('popup');
 
-  /* 1. 任何網域，只要 content script 說支援就能擷取 */
+  /* 1. 打開就跑完，表格就是最終結果 —— 沒有「擷取」那一步 */
   {
-    const shopify = await openPopup({
+    const p = await openPopup({
       tabUrl: 'https://chiikawamarket.jp/account?page=1',
       pong: SHOPIFY,
-      orders: [order('A1', day(0))],
+      scraped: result([parcel('A1', '111'), parcel('A2', '222')]),
     });
-    c.eq('不在清單上的網域也會先問 content script', shopify.pinged > 0, true);
-    c.eq('狀態顯示站台名稱', shopify.status, '已就緒（Shopify 商店）');
-    c.eq('列出這一頁的訂單', shopify.listed, ['A1']);
-    c.eq('有勾選就能擷取', shopify.scrapeEnabled, true);
+    c.eq('不在清單上的網域也會先問 content script', p.pinged() > 0, true);
+    c.eq('打開就送出擷取', p.sent.some((m) => m.type === 'SCRAPE'), true);
+    c.eq('沒有「擷取」按鈕，只有下載', p.d.getElementById('scrape'), null);
+    c.eq('狀態顯示站台名稱', p.status, '已就緒（Shopify 商店）');
+    c.eq('欄位依序是 注文番号 / 品名 / 合計 / 配送業者・ID',
+      p.headers.slice(1), ['注文番号', '品名', '合計', '配送業者 / ID']);
+    c.eq('一個包裹一列', p.rows.length, 2);
+    c.eq('每一列都有 checkbox', p.boxes().length, 2);
   }
 
-  /* 2. 原本就支援的站台不受影響 */
-  {
-    const amazon = await openPopup({
-      tabUrl: 'https://www.amazon.co.jp/gp/css/order-history',
-      pong: { ok: true, onOrderPage: true, site: 'amazon', label: 'Amazon.co.jp' },
-      orders: [order('B1', day(1))],
-    });
-    c.eq('Amazon 可以擷取', [amazon.scrapeEnabled, amazon.status], [true, '已就緒（Amazon.co.jp）']);
-  }
-
-  /* 3. 只列出七天內下單的訂單，更舊的不列 */
+  /* 2. 每一列的內容 */
   {
     const p = await openPopup({
-      tabUrl: 'https://tower.jp/ec/Customer/Order/List',
-      pong: TOWER,
-      orders: [
-        order('今天', day(0)),
-        order('第6天', day(6)),
-        order('第7天', day(7)),
-        order('第30天', day(30)),
-        order('沒日期', null),
-      ],
+      tabUrl: 'https://chiikawamarket.jp/account',
+      pong: SHOPIFY,
+      scraped: result([parcel('B1', '510965337234', {
+        total: 3410,
+        carrier: 'Yamato (JA)',
+        items: [{ title: 'ステッカー', quantity: 1 }, { title: 'マスコット', quantity: 3 }],
+      })]),
     });
-    c.eq('只列七天內的（第 7 天已經超過）', p.listed, ['今天', '第6天', '沒日期']);
-    c.eq('日期不明的照樣列出來 —— 不知道就不要默默藏起來', p.listed.includes('沒日期'), true);
-    c.eq('列出來的七天內訂單預設勾選', p.checked, ['今天', '第6天']);
-    c.eq('日期不明的不預設勾選', p.checked.includes('沒日期'), false);
-    c.eq('提示寫出總共掃過幾筆', p.hint, '7 天內 3 筆（掃過 5 筆）');
-    c.eq('沒有任何按鈕可以把舊訂單叫出來', p.extraButtons, 0);
-    c.eq('按鈕寫出勾了幾筆', p.scrapeLabel, '擷取選取的 2 筆');
+    const cells = [...p.rows[0].querySelectorAll('td')].map((td) => td.textContent.trim());
+    c.eq('注文番号', cells[1], 'B1');
+    c.eq('品名一件一行，2 件以上才標數量',
+      [...p.rows[0].querySelectorAll('.title')].map((t) => t.textContent), ['ステッカー', 'マスコット ×3']);
+    c.eq('合計', cells[3], '¥3,410');
+    c.eq('配送業者 / ID', cells[4], 'Yamato (JA) 510965337234');
   }
 
-  /* 4. 第 7 天就是界線 */
+  /* 3. 預設全部勾選，下載按鈕寫出筆數 */
   {
     const p = await openPopup({
-      tabUrl: 'https://tower.jp/ec/Customer/Order/List',
-      pong: TOWER,
-      orders: [order('第5天', day(5)), order('第6天', day(6)), order('第7天', day(7)), order('第8天', day(8))],
+      tabUrl: 'https://chiikawamarket.jp/account',
+      pong: SHOPIFY,
+      scraped: result([parcel('C1', '1'), parcel('C2', '2'), parcel('C3', '3')]),
     });
-    c.eq('第 6 天還在，第 7 天開始不列', p.listed, ['第5天', '第6天']);
+    c.eq('預設全部勾選', p.checked, 3);
+    c.eq('下載按鈕寫出筆數', p.saveBtn.textContent, '下載 JSON（3 筆）');
+    c.eq('提示寫出天數與包裹數', p.d.getElementById('summary').textContent, '7 天內 3 個包裹');
   }
 
-  /* 5. 這一頁本來就沒有更舊的訂單 */
+  /* 4. 只下載勾選的 */
   {
     const p = await openPopup({
-      tabUrl: 'https://tower.jp/ec/Customer/Order/List',
-      pong: TOWER,
-      orders: [order('C1', day(0)), order('C2', day(3))],
+      tabUrl: 'https://chiikawamarket.jp/account',
+      pong: SHOPIFY,
+      scraped: result([parcel('D1', '111'), parcel('D2', '222'), parcel('D3', '333')]),
     });
-    c.eq('提示只寫總筆數', p.hint, '共 2 筆');
-  }
-
-  /* 6. 整頁都是舊訂單 → 清單是空的，但要講清楚為什麼 */
-  {
-    const p = await openPopup({
-      tabUrl: 'https://tower.jp/ec/Customer/Order/List',
-      pong: TOWER,
-      orders: [order('D1', day(10)), order('D2', day(20))],
-    });
-    c.eq('一筆都不列', p.listed, []);
-    c.eq('不能擷取', p.scrapeEnabled, false);
-    c.eq('說明為什麼是空的', p.status, '沒有 7 天內的訂單（掃過 2 筆都更舊）');
-    c.eq('沒有任何按鈕可以把它們叫出來', p.extraButtons, 0);
-  }
-
-  /* 7. 勾選狀態改變時按鈕跟著更新；全部取消就不能擷取 */
-  {
-    const p = await openPopup({
-      tabUrl: 'https://tower.jp/ec/Customer/Order/List',
-      pong: TOWER,
-      orders: [order('X1', day(0)), order('X2', null)],
-    });
-    const [first, second] = p.boxes();
-
-    second.checked = true;
-    p.fire(second);
-    c.eq('手動勾選日期不明的那筆', p.scrapeLabel, '擷取選取的 2 筆');
-
-    first.checked = false;
+    const [, second] = p.boxes();
     second.checked = false;
-    for (const b of [first, second]) p.fire(b);
-    c.eq('全部取消 → 不能擷取', p.scrapeEnabled, false);
-    c.eq('全部取消 → 按鈕文字還原', p.scrapeLabel, '擷取選取的訂單');
+    p.fire(second);
+    c.eq('取消一筆後按鈕跟著變', p.saveBtn.textContent, '下載 JSON（2 筆）');
+
+    p.saveBtn.click();
+    const json = await p.downloaded();
+    c.eq('只下載勾選的那幾筆', json.map((o) => o.trackingId), ['111', '333']);
+    c.eq('下載的是匯出格式（不是畫面上的文字）', Object.keys(json[0]),
+      ['orderId', 'orderedAt', 'total', 'currency', 'carrier', 'trackingId', 'items']);
   }
 
-  /* 8. 全選只作用在列出來的那些 */
+  /* 5. 全選 / 全不選 */
   {
     const p = await openPopup({
-      tabUrl: 'https://tower.jp/ec/Customer/Order/List',
-      pong: TOWER,
-      orders: [order('Y1', day(0)), order('Y2', null), order('Y3', day(90))],
+      tabUrl: 'https://chiikawamarket.jp/account',
+      pong: SHOPIFY,
+      scraped: result([parcel('E1', '1'), parcel('E2', '2')]),
     });
     const selectAll = p.d.getElementById('selectAll');
-    c.eq('部分勾選時全選是未定狀態', [selectAll.checked, selectAll.indeterminate], [false, true]);
+    c.eq('全部勾著時全選也是勾的', [selectAll.checked, selectAll.indeterminate], [true, false]);
 
-    selectAll.checked = true;
+    selectAll.checked = false;
     p.fire(selectAll);
-    c.eq('全選把列出來的都勾起來', p.checked, ['Y1', 'Y2']);
-    c.eq('沒列出來的不受影響', p.listed.includes('Y3'), false);
+    c.eq('全不選', p.checked, 0);
+    c.eq('沒勾任何一筆就不能下載', p.saveBtn.disabled, true);
+    c.eq('按鈕文字還原', p.saveBtn.textContent, '下載 JSON');
+
+    const [first] = p.boxes();
+    first.checked = true;
+    p.fire(first);
+    c.eq('部分勾選時全選是未定狀態', [selectAll.checked, selectAll.indeterminate], [false, true]);
   }
 
-  /* 9. 擷取時只送出勾選的注文番号 */
+  /* 6. 注文日讀不到的包裹：列出來但不預設勾選（不知道是不是七天內，別替使用者決定） */
   {
     const p = await openPopup({
-      tabUrl: 'https://tower.jp/ec/Customer/Order/List',
-      pong: TOWER,
-      orders: [order('Z1', day(0)), order('Z2', day(2)), order('Z3', null), order('Z4', day(60))],
+      tabUrl: 'https://chiikawamarket.jp/account',
+      pong: SHOPIFY,
+      scraped: result([parcel('F1', '1'), parcel('F2', '2', { orderedAt: null })]),
     });
-    p.scrapeBtn.click();
-    await new Promise((r) => setTimeout(r, 0));
-    const scrape = p.sent.find((m) => m.type === 'SCRAPE');
-    c.eq('只送出勾選的那幾筆', scrape?.payload?.orderIds, ['Z1', 'Z2']);
-    c.eq('沒勾的不會被送出', scrape?.payload?.orderIds.includes('Z3'), false);
-    c.eq('沒列出來的更不會被送出', scrape?.payload?.orderIds.includes('Z4'), false);
+    c.eq('兩筆都列出來', p.rows.length, 2);
+    c.eq('日期不明的不預設勾選', p.boxes().map((b) => b.checked), [true, false]);
+    c.eq('標出日期不明', p.rows[1].textContent.includes('日期不明'), true);
   }
 
-  /* 10. 自動翻頁：翻了幾頁要讓使用者知道，不然會以為清單只來自眼前這一頁 */
+  /* 7. 翻了幾頁要講出來，不然使用者會以為只來自眼前這一頁 */
   {
     const many = await openPopup({
       tabUrl: 'https://chiikawamarket.jp/account',
       pong: SHOPIFY,
-      orders: [order('P1', day(0)), order('P2', day(3))],
-      pages: 3,
+      scraped: result([parcel('G1', '1')], { pages: 3 }),
     });
     c.eq('狀態寫出翻了幾頁', many.status, '已就緒（Shopify 商店，翻了 3 頁）');
-
-    const single = await openPopup({
-      tabUrl: 'https://chiikawamarket.jp/account',
-      pong: SHOPIFY,
-      orders: [order('P1', day(0))],
-    });
-    c.eq('只有一頁時不提翻頁', single.status, '已就緒（Shopify 商店）');
   }
 
-  /* 11. content script 說不支援 → 不列清單、不能擷取 */
+  /* 8. 配送中卻讀不到 tracking ID 的包裹：不列，但要說 */
   {
-    const other = await openPopup({
+    const p = await openPopup({
+      tabUrl: 'https://www.amazon.co.jp/your-orders/orders',
+      pong: { ok: true, onOrderPage: true, site: 'amazon', label: 'Amazon.co.jp' },
+      scraped: result([parcel('H1', '1')], { missingTracking: 2 }),
+    });
+    c.eq('有警告', p.warning, '另有 2 個配送中的包裹讀不到配送資料，沒有列出來');
+    c.eq('其餘照常列出', p.rows.length, 1);
+  }
+
+  /* 9. 七天內沒有配送中的訂單 */
+  {
+    const p = await openPopup({ tabUrl: 'https://chiikawamarket.jp/account', pong: SHOPIFY, scraped: result([]) });
+    c.eq('說清楚是沒有，不是壞掉', p.status, '7 天內沒有配送中的訂單（Shopify 商店）');
+    c.eq('不顯示表格', p.resultShown, false);
+  }
+
+  /* 10. 擷取失敗 → 給訊息，不要整個壞掉 */
+  {
+    const p = await openPopup({
+      tabUrl: 'https://chiikawamarket.jp/account',
+      pong: SHOPIFY,
+      scraped: { ok: false, error: '需要重新登入，請在分頁登入後再試一次' },
+    });
+    c.eq('顯示錯誤', [p.isError, p.status], [true, '擷取失敗：需要重新登入，請在分頁登入後再試一次']);
+    c.eq('不顯示表格', p.resultShown, false);
+  }
+
+  /* 11. content script 說不支援 → 不擷取 */
+  {
+    const p = await openPopup({
       tabUrl: 'https://chiikawamarket.jp/products/abc',
       pong: { ok: true, onOrderPage: false, site: null, label: null },
     });
-    c.eq('不支援就停用擷取', other.scrapeEnabled, false);
-    c.eq('顯示錯誤狀態', other.isError, true);
-    c.eq('不支援時只給訊息，不加任何按鈕', other.extraButtons, 0);
-    c.eq('不支援時不會問 PREVIEW', other.sent.some((m) => m.type === 'PREVIEW'), false);
+    c.eq('顯示錯誤狀態', [p.isError, p.status], [true, '目前的分頁不是支援的訂單紀錄頁']);
+    c.eq('不支援時不會送出擷取', p.sent.some((m) => m.type === 'SCRAPE'), false);
+    c.eq('不支援時不加任何按鈕', p.extraButtons, 0);
   }
 
-  /* 11. 這一頁沒有可擷取的訂單 */
+  /* 12. 分頁裡還沒有 content script → 先注入再問 */
   {
-    const empty = await openPopup({ tabUrl: 'https://chiikawamarket.jp/account', pong: SHOPIFY, orders: [] });
-    c.eq('沒有訂單就停用擷取', empty.scrapeEnabled, false);
-    c.eq('說清楚是沒有訂單，不是不支援', empty.status, '這一頁沒有可擷取的訂單（Shopify 商店）');
-  }
-
-  /* 12. 解析失敗 → 給訊息，不要整個壞掉 */
-  {
-    const broken = await openPopup({ tabUrl: 'https://chiikawamarket.jp/account', pong: SHOPIFY, previewFails: true });
-    c.eq('解析失敗時停用擷取', broken.scrapeEnabled, false);
-    c.eq('解析失敗時顯示錯誤', broken.isError, true);
-  }
-
-  /* 13. 分頁裡還沒有 content script → 先注入再問 */
-  {
-    const fresh = await openPopup({
+    const p = await openPopup({
       tabUrl: 'https://nagano-market.jp/account',
       pong: SHOPIFY,
-      orders: [order('N1', day(0))],
+      scraped: result([parcel('N1', '1')]),
       pingThrows: true,
     });
-    c.eq('注入了 content script', fresh.injected.includes('src/content/main.js'), true);
-    c.eq('注入後可以擷取', fresh.scrapeEnabled, true);
+    c.eq('注入了 content script', p.injected.includes('src/content/main.js'), true);
+    c.eq('注入後照常擷取', p.rows.length, 1);
   }
 
-  /* 14. 注入不進去（chrome:// 等頁面）→ 給訊息，不要整個壞掉 */
+  /* 13. 注入不進去（chrome:// 等頁面）→ 給訊息，不要整個壞掉 */
   {
-    const blocked = await openPopup({
-      tabUrl: 'chrome://extensions',
-      pong: SHOPIFY,
-      pingThrows: true,
-      injectFails: true,
-    });
-    c.eq('無法注入時停用擷取', blocked.scrapeEnabled, false);
-    c.eq('無法注入時顯示錯誤', blocked.isError, true);
-    c.eq('無法注入時也不加任何按鈕', blocked.extraButtons, 0);
+    const p = await openPopup({ tabUrl: 'chrome://extensions', pong: SHOPIFY, pingThrows: true, injectFails: true });
+    c.eq('無法注入時顯示錯誤', [p.isError, p.status], [true, '這個分頁無法擷取，請開啟訂單紀錄頁後重試']);
+    c.eq('無法注入時不加任何按鈕', p.extraButtons, 0);
   }
 
   return c.report();

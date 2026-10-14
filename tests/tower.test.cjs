@@ -134,7 +134,39 @@ module.exports = async function run() {
     c.eq('注文日', (await read(LIST))[0]?.orderedAt, '2026-10-08');
   }
 
-  /* 9. PING 回報站台；不是會員頁就不該認得 */
+  /* 9. 翻頁停在七天：已送達（受取済）的舊訂單也算數 ——
+   *    那筆不擷取，但它的注文日一樣代表「界線過了」，不能因為它被略過就繼續往下翻。
+   *    日期改成相對於今天，下一頁的連結與第 2 頁是加上去的（實際頁面上沒有分頁區塊） */
+  {
+    const ymd = (n) => {
+      const d = new Date();
+      d.setHours(12, 0, 0, 0);
+      d.setDate(d.getDate() - n);
+      return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const redate = (box, daysAgo) =>
+      box.replace(/(<td class="ttl">注文日<\/td><td>：)\d{4}\/\d{2}\/\d{2}/, `$1${ymd(daysAgo)}`);
+    const NEXT = '<a href="/ec/Customer/Order/List?page=2">次へ</a>';
+    const PAGE2 = redate(LIVE, 2)
+      .replace(new RegExp(WANT.orderId, 'g'), '26J00000000002')
+      .replace(new RegExp(WANT.trackingId, 'g'), '320443645499');
+    const serve = (url) => (url.includes('page=2') ? page(PAGE2) : null);
+
+    // 第 1 頁：七天內配送中的一筆 ＋ 三十天前已送達的一筆
+    const boundary = setup(page(redate(LIVE, 1) + redate(RECEIVED, 30) + NEXT), URL_LIST, { pages: serve });
+    const stopped = await boundary.scrape({ recentDays: 7 });
+    c.eq('已送達的舊訂單也讓翻頁停下來', stopped.pages, 1);
+    c.eq('沒有去要第 2 頁', boundary.asked.length, 0);
+    c.eq('七天內配送中的那筆照常列出', stopped.orders.map((o) => o.orderId), [WANT.orderId]);
+
+    // 對照：整頁都在七天內 → 會翻到第 2 頁
+    const recent = setup(page(redate(LIVE, 1) + NEXT), URL_LIST, { pages: serve });
+    const both = await recent.scrape({ recentDays: 7 });
+    c.eq('整頁都在七天內 → 翻到第 2 頁', both.pages, 2);
+    c.eq('第 2 頁的訂單也列出來', both.orders.map((o) => o.orderId), [WANT.orderId, '26J00000000002']);
+  }
+
+  /* 10. PING 回報站台；不是會員頁就不該認得 */
   {
     const { ping } = setup(page(LIST), URL_LIST);
     const pong = await ping();

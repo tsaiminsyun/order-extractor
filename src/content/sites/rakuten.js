@@ -119,7 +119,8 @@
   // 所以同一筆訂單的商品會掛在它的每個伝票番号下
   const toShipments = (pairs, items) => pairs.map(({ carrier, trackingId }) => ({ carrier, trackingId, items }));
 
-  // 沒有伝票番号、或包裹都已送達的訂單不擷取（回傳 null）。列表頁看得出來時，連詳細頁都不載入
+  // 沒有伝票番号、或包裹都已送達的訂單不擷取（回傳空的訂單，注文日留給翻頁判斷七天的界線）。
+  // 列表頁看得出來時，連詳細頁都不載入
   // 数量只在詳細頁，用品名對回列表頁的商品；品名對不上時依出現順序，都對不上就當 1 件
   function applyQuantities(items, quantities) {
     const byTitle = new Map(quantities.map((q) => [q.title, q.quantity]));
@@ -130,7 +131,9 @@
 
   function buildOrder({ orderId, card }, baseUrl) {
     const onList = readShipments(card);
-    if (hasShippingBlock(card) && !onList.length) return null;
+    if (hasShippingBlock(card) && !onList.length) {
+      return { orderId, orderedAt: orderDate(card), total: null, currency: 'JPY', shipments: [], lookups: [] };
+    }
 
     // 列表頁沒有数量，先當 1 件，讀到詳細頁再回填
     const items = findProducts(card).map(({ title, imageUrl }) => ({ title, quantity: 1, imageUrl }));

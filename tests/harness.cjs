@@ -61,7 +61,6 @@ function setup(html, url, { pages } = {}) {
     return body == null ? miss : { ok: true, status: 200, url, text: async () => body, json: async () => JSON.parse(body) };
   };
   globalThis.chrome = {
-    storage: { local: { set: async () => {} } },
     runtime: {
       getManifest: () => ({ version: 'test' }),
       onMessage: {
@@ -75,12 +74,12 @@ function setup(html, url, { pages } = {}) {
     },
   };
   loadContentScripts();
+  /* 測試預設**不套七天的規則**（recentDays: Infinity）—— fixture 都是幾週前擷取的，
+   * 套了就全部變成「舊訂單」。要驗七天規則的測試自己傳 recentDays，並用相對於今天的日期 */
   const scrape = (payload = {}) =>
-    new Promise((res) => listeners.at(-1)({ type: 'SCRAPE', payload }, null, res));
+    new Promise((res) => listeners.at(-1)({ type: 'SCRAPE', payload: { recentDays: Infinity, ...payload } }, null, res));
   const ping = () => new Promise((res) => listeners.at(-1)({ type: 'PING' }, null, res));
-  // 擷取前的清單（會翻頁，但不讀詳細頁）
-  const preview = () => new Promise((res) => listeners.at(-1)({ type: 'PREVIEW' }, null, res));
-  return { dom, scrape, preview, ping, asked, listeners };
+  return { dom, scrape, ping, asked, listeners };
 }
 
 /* ---------- 斷言 ---------- */

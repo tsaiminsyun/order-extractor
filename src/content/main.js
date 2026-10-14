@@ -1,9 +1,11 @@
-/* 擷取流程（各站台共用）：掃描訂單列表（必要時自動翻頁）→ 讀取需要另外載入的頁面
- * （配送資料 / 合計）。
+/* 擷取流程（各站台共用）。popup 一打開就整套跑完，表格上看到的就是最終結果：
+ *   1. 掃描訂單列表，必要時自動往後翻頁
+ *   2. 七天內、而且有東西可擷取的訂單，讀取需要另外載入的頁面（配送資料 / 合計）
+ *   3. 只交出有 tracking ID 的包裹
  *
  * 這個擴充功能只要**配送中**的訂單。已送達的在認得出來的站台上由各站台的轉接層擋掉；
  * 認不出來的站台（Shopify、楽天英文介面）改用「下單未滿七天」當替代條件。
- * 翻頁也是停在這條線上 —— 訂單列表都是新到舊排的，翻到整頁都超過七天就不必再往下。 */
+ * 翻頁也停在這條線上 —— 訂單列表都是新到舊排的，看到第一筆超過七天的就不必再往下。 */
 (() => {
   'use strict';
   const { sites, readers, util } = globalThis.OrderScraper;
@@ -26,10 +28,8 @@
   const daysAgo = (orderedAt) =>
     Math.round((startOfToday() - Date.parse(`${orderedAt}T00:00:00`)) / 86400000);
 
-  // 日期不明的既不算新也不算舊 —— 站台改版導致日期抓不到時，訂單不該整批無聲消失
-  const isRecent = (orderedAt) =>
-    orderedAt != null && daysAgo(orderedAt) >= 0 && daysAgo(orderedAt) < RECENT_DAYS;
-  const isOld = (orderedAt) => orderedAt != null && daysAgo(orderedAt) >= RECENT_DAYS;
+  // 日期不明的不算舊 —— 站台改版導致日期抓不到時，訂單不該整批無聲消失
+  const isOld = (orderedAt, recentDays) => orderedAt != null && daysAgo(orderedAt) >= recentDays;
 
   /* ---------- 需要真的載入才讀得到的頁面 ---------- */
 
@@ -76,6 +76,8 @@
 
   /* ---------- 掃描訂單列表 ---------- */
 
+  // 各站台對「不擷取」的訂單（已送達、沒有伝票番号）回傳空的訂單而不是 null ——
+  // 那些訂單的注文日翻頁時還用得到
   const parseOrders = (site, doc, url) => site.findOrders(doc, url).filter(Boolean);
 
   // 另外載入的列表頁：前端渲染的要等訂單卡片出現才讀得到
@@ -91,24 +93,16 @@
   }
 
   /* 從使用者眼前這一頁開始往後翻，直到：
-   *   - 沒有下一頁的連結（或站台沒有實作）
    *   - 這一頁出現超過七天的訂單（列表是新到舊排的，再往後只會更舊）
+   *   - 沒有下一頁的連結（或站台沒有實作）
    *   - 翻到的頁面沒有新的注文番号（重複或空頁）
    *   - 到達 MAX_PAGES
-   * 翻頁失敗不算錯誤：把已經掃到的交出去就好。
-   *
-   * 掃到的訂單**全部**回傳，超過七天的只是標記起來（見 summarize 的 old）——
-   * 要不要顯示由 popup 決定。這一層只用七天決定「翻到哪裡為止」。 */
-  async function scanOrders() {
-    const site = currentSite();
-    if (!site) throw new Error('目前頁面不是支援的訂單列表頁');
-    if (site.isSignInPage(document, location.href)) {
-      throw new Error('需要重新登入，請在分頁登入後再試一次');
-    }
-
+   * 「超過七天」看的是**每一筆**訂單，包括已送達、沒伝票番号這些不擷取的 ——
+   * 不然界線剛好落在一串已送達的訂單上時，會白翻下一頁。
+   * 翻頁失敗不算錯誤：把已經掃到的交出去就好。 */
+  async function scanOrders(site, recentDays) {
     const seen = new Set();
-    const kept = [];
-    let scanned = 0;
+    const scanned = [];
     let pages = 0;
     let atPageCap = false;
     // 第一頁用使用者眼前這一份 document，不重新載入
@@ -118,12 +112,10 @@
       pages += 1;
       // 同一筆注文番号在頁面上可能出現多次（桌機 / 手機版版面），也可能跨頁重複
       const fresh = page.orders.filter((o) => !seen.has(o.orderId) && seen.add(o.orderId));
-      scanned += fresh.length;
-      kept.push(...fresh);
-      progress({ phase: 'scan', pages, orders: kept.filter((o) => !isOld(o.orderedAt)).length });
+      scanned.push(...fresh);
+      progress({ phase: 'scan', pages });
 
-      // 看到第一筆超過七天的就不再往下翻 —— 列表是新到舊排的，下一頁只會更舊
-      if (fresh.some((o) => isOld(o.orderedAt))) break;
+      if (fresh.some((o) => isOld(o.orderedAt, recentDays))) break;
       if (!fresh.length && pages > 1) break;
       if (!page.next) break;
       if (pages >= MAX_PAGES) { atPageCap = true; break; }
@@ -134,78 +126,53 @@
         break; // 下一頁讀不到就停在這裡，已經掃到的照樣可用
       }
     }
-
-    return { site, orders: kept, scanned, pages, atPageCap };
+    return { scanned, pages, atPageCap };
   }
 
   /* ---------- 主流程 ---------- */
 
-  /* 給 popup 勾選用的清單：只有列表頁上就看得到的欄位，不讀詳細頁。
-   * trackingIds 在 Shopify 與楽天英文介面會是空的（要讀詳細頁才知道），
-   * 所以空的不代表沒有伝票番号 —— needsLookup 為真就是「還不知道」 */
-  const summarize = (order) => ({
-    orderId: order.orderId,
-    orderedAt: order.orderedAt ?? null,
-    // 兩個都是 false 就是「日期不明」：既不預設勾選，也不該藏起來
-    recent: isRecent(order.orderedAt),
-    old: isOld(order.orderedAt),
-    total: order.total ?? null,
-    currency: order.currency,
-    trackingIds: order.shipments.map((s) => s.trackingId).filter(Boolean),
-    itemCount: order.shipments.reduce((n, s) => n + s.items.length, 0),
-    needsLookup: order.lookups.length > 0,
-  });
+  const hasWork = (order) => order.shipments.length > 0 || order.lookups.length > 0;
 
-  // preview 掃到的訂單留著給 scrape 用 —— 勾選的可能來自第 2、3 頁，重新解析目前這一頁會找不到
-  let lastScan = null;
-
-  async function preview() {
-    const { site, orders, scanned, pages, atPageCap } = await scanOrders();
-    lastScan = { pageUrl: location.href, orders };
-    return {
-      ok: true,
-      site: site.name,
-      label: site.label,
-      recentDays: RECENT_DAYS,
-      scanned,
-      pages,
-      atPageCap,
-      orders: orders.map(summarize),
-    };
-  }
-
-  // orderIds：popup 勾選的那幾筆。沒指定就全部擷取
-  async function scrape({ withLookups = true, orderIds = null } = {}) {
+  // recentDays 平常不用給。測試會傳 Infinity 關掉七天的規則 —— fixture 都是幾週前擷取的
+  async function run({ withLookups = true, recentDays } = {}) {
+    const days = recentDays > 0 ? recentDays : RECENT_DAYS;
     const site = currentSite();
     if (!site) throw new Error('目前頁面不是支援的訂單列表頁');
+    if (site.isSignInPage(document, location.href)) {
+      throw new Error('需要重新登入，請在分頁登入後再試一次');
+    }
 
-    // preview 剛掃過而且涵蓋了勾選的那幾筆，就沿用 —— 不必為了第 2 頁的訂單再翻一次
-    const cached = lastScan?.pageUrl === location.href ? lastScan.orders : null;
-    const covered = cached && (!orderIds || orderIds.every((id) => cached.some((o) => o.orderId === id)));
-    const found = covered ? cached : (await scanOrders()).orders;
-
-    const orders = orderIds ? found.filter((o) => orderIds.includes(o.orderId)) : found;
+    const { scanned, pages, atPageCap } = await scanOrders(site, days);
+    // 只有七天內、而且有東西可擷取的才去讀詳細頁 —— 舊訂單讀了也不會列出來
+    const orders = scanned.filter((o) => !isOld(o.orderedAt, days) && hasWork(o));
     progress({ phase: 'parsed', orders: orders.length });
 
     if (withLookups && orders.length) await runLookups(orders);
 
     // 一個包裹一筆：同一筆訂單有多個包裹時，注文番号與合計會重複出現
-    const entries = orders.flatMap(({ orderId, orderedAt, total, currency, shipments }) =>
+    const parcels = orders.flatMap(({ orderId, orderedAt, total, currency, shipments }) =>
       shipments.map(({ carrier, trackingId, items }) =>
         ({ orderId, orderedAt, total, currency, carrier, trackingId, items })));
+    // 只交出有 tracking ID 的。配送中卻讀不到 ID 的（例如配送狀況頁被擋下）不列，但要報個數
+    const withTracking = parcels.filter((p) => p.trackingId);
 
-    const result = {
+    return {
       ok: true,
       site: site.name,
       version: chrome.runtime.getManifest().version,
       scrapedAt: new Date().toISOString(),
       pageUrl: location.href,
-      orders: entries,
+      recentDays: days,
+      pages,
+      atPageCap,
+      missingTracking: parcels.length - withTracking.length,
+      orders: withTracking,
     };
-    // popup 可能在擷取途中被關掉，先存起來，重開時仍看得到結果
-    await chrome.storage.local.set({ lastResult: result }).catch(() => {});
-    return result;
   }
+
+  // popup 關掉再打開時，上一次還沒跑完的就接著等，不要再開一批 iframe
+  let inflight = null;
+  const scrape = (payload) => (inflight ??= run(payload).finally(() => { inflight = null; }));
 
   /* ---------- 訊息 ---------- */
 
@@ -222,11 +189,6 @@
         });
         return false;
       }
-      case 'PREVIEW':
-        preview()
-          .then(sendResponse)
-          .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
-        return true; // 非同步回覆（可能要翻頁）
       case 'SCRAPE':
         scrape(msg.payload)
           .then(sendResponse)

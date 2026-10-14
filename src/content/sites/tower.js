@@ -101,15 +101,15 @@
     return byId;
   }
 
-  // 沒有伝票番号的還沒出貨、「（受取済）」的已經送達，兩種都不擷取；
-  // 整筆訂單都沒剩就回傳 null。合計照樣從第一個區塊讀（每個區塊都帶整筆訂單的合計）
+  // 沒有伝票番号的還沒出貨、「（受取済）」的已經送達，兩種都不擷取。
+  // 整筆訂單都沒剩就回傳空的訂單（注文日留給翻頁判斷七天的界線）。
+  // 合計照樣從第一個區塊讀（每個區塊都帶整筆訂單的合計）
   function buildOrder(orderId, boxes) {
     const shipments = boxes
       .filter((box) => !isDelivered(box))
       .map((box) => ({ shipment: readShipment(box), items: findItems(box) }))
       .filter(({ shipment }) => shipment)
       .map(({ shipment, items }) => ({ ...shipment, items }));
-    if (!shipments.length) return null;
     return {
       orderId,
       orderedAt: parseDate(valueOf(boxes[0], LABELS.orderedAt)),

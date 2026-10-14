@@ -10,23 +10,16 @@
       <p id="status" class="status">檢查分頁中…</p>
     </header>
 
-    <section id="candidates" class="candidates hidden">
-      <div class="candidates-head">
-        <label class="select-all"><input type="checkbox" id="selectAll" /> 全選</label>
-        <span id="candidateHint" class="hint"></span>
-      </div>
-      <div id="candidateList" class="candidate-list"></div>
-    </section>
-
-    <button id="scrape" class="primary" disabled>擷取選取的訂單</button>
-
     <p id="progress" class="progress hidden"></p>
+    <p id="warning" class="status error hidden"></p>
 
     <section id="result" class="result hidden">
-      <div class="actions">
-        <button id="saveJson">下載 JSON</button>
+      <div class="result-head">
+        <label class="select-all"><input type="checkbox" id="selectAll" /> 全選</label>
+        <span id="summary" class="hint"></span>
       </div>
       <div class="preview" id="preview"></div>
+      <button id="saveJson" class="primary" disabled>下載 JSON</button>
     </section>
 
     <script type="module" src="popup.js"></script>

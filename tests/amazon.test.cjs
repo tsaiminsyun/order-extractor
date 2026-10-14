@@ -130,13 +130,15 @@ module.exports = async function run() {
     c.eq('排除按鈕連結', orders[0]?.items.map((i) => i.title), ['商品']);
   }
 
-  /* 8. 讀取配送狀況頁失敗時，配送欄位留空 */
+  /* 8. 讀取配送狀況頁失敗時：沒有 tracking ID 就不列出來，但要報個數 ——
+   *    它確實在配送中（有配送状況を確認按鈕），只是 ID 讀不到，不能無聲無息地消失 */
   {
     const html = PAGE(CARD(HEADER('503-0000000-0000008', '合計', '￥700') +
       BOX(TITLE('B0FAIL0001', '商品') + TRACK('S9'))));
     const { scrape } = setup(html, URL_LIST, { pages: () => null });
-    const { orders } = await scrape();
-    c.eq('iframe 被擋下時仍保留訂單，配送欄位留空', [orders[0]?.items.length, orders[0]?.carrier, orders[0]?.trackingId], [1, '', '']);
+    const result = await scrape();
+    c.eq('讀不到 tracking ID 的包裹不列出來', result.orders.length, 0);
+    c.eq('但有報出讀不到幾個', result.missingTracking, 1);
   }
 
   /* 9. PING 回報站台 */
@@ -208,14 +210,16 @@ module.exports = async function run() {
     };
 
     const s = setup(pages['/your-orders/orders'], URL_LIST, { pages: serve });
-    const list = await s.preview();
-    c.eq('兩頁的訂單都掃到', list.orders.map((o) => o.orderId), ['503-0000001-0000001', '503-0000002-0000001']);
-    c.eq('翻到空頁就停', list.pages, 3);
-    c.eq('翻頁是用 iframe 載入的', s.asked.map((a) => new URL(a.url).search), ['?page=2', '?page=3']);
+    const result = await s.scrape();
+    c.eq('兩頁的訂單都擷取到', result.orders.map((o) => o.orderId), ['503-0000001-0000001', '503-0000002-0000001']);
+    c.eq('翻到空頁就停', result.pages, 3);
+    c.eq('翻頁是用 iframe 載入的',
+      s.asked.filter((a) => a.url.includes('/your-orders/')).map((a) => new URL(a.url).search), ['?page=2', '?page=3']);
+    c.eq('第 2 頁的包裹也讀到配送資料', result.orders[1]?.trackingId, '421304890904');
 
     // 認不出下一頁時停在目前這一頁，行為跟沒有分頁功能一樣
     const alone = setup(PAGE(card(1)), URL_LIST, { pages: trackingPages });
-    const only = await alone.preview();
+    const only = await alone.scrape();
     c.eq('沒有下一頁就只掃一頁', [only.pages, only.orders.length], [1, 1]);
   }
 

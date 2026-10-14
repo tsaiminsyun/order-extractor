@@ -33,6 +33,22 @@ const serve = ({ order }, token, images = {}) => (url) => {
   return images[key] ? JSON.stringify({ featured_image: images[key] }) : null;
 };
 
+/* 七天的規則要用相對於今天的日期才驗得準，所以把 <time> 換掉 —— 只動日期，其餘結構不變 */
+const ymd = (daysAgo) => {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() - daysAgo);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const timeTag = (day) => `<time datetime="${day}T00:00:00Z">${day}</time>`;
+const dated = (html, daysAgo) => html.replace(/<time[^>]*>[^<]*<\/time>/g, timeTag(ymd(daysAgo)));
+// 依序替換：第 1 筆用 days[0]、第 2 筆用 days[1]…，不夠的沿用最後一個
+const datedEach = (html, days) => {
+  let i = 0;
+  return html.replace(/<time[^>]*>[^<]*<\/time>/g, () => timeTag(ymd(days[Math.min(i++, days.length - 1)])));
+};
+const renumber = (html, from, into) => html.replace(new RegExp(from, 'g'), into);
+
 module.exports = async function run() {
   const c = new Check('Shopify 商店（實際 HTML）');
 
@@ -126,13 +142,14 @@ module.exports = async function run() {
     c.eq('換語系後結果完全相同', en.orders, ja.orders);
   }
 
-  /* 7. 只擷取目前頁面：不論網址停在第幾頁都不會去抓別頁 */
+  /* 7. 從使用者眼前這一頁往後翻，不會回頭重抓前面的頁 */
   {
-    for (const q of ['?page=1', '?page=3', '']) {
+    for (const [q, next] of [['?page=1', '2'], ['?page=3', '4'], ['', '2']]) {
       const s = setup(page(DAWN.list), `${DAWN.shop}/account${q}`, { pages: serve(DAWN, DAWN_TOKEN) });
       await s.scrape();
-      c.eq(`${q || '沒有 page 參數'} 不會再去抓訂單列表`,
-        s.asked.filter((a) => new URL(a.url).pathname.replace(/\/$/, '') === '/account'), []);
+      const lists = s.asked.filter((a) => new URL(a.url).pathname.replace(/\/$/, '') === '/account');
+      c.eq(`${q || '沒有 page 參數'} 只往後要第 ${next} 頁`,
+        lists.map((a) => new URL(a.url).searchParams.get('page')), [next]);
     }
   }
 
@@ -155,7 +172,7 @@ module.exports = async function run() {
     c.eq('伝票番号不變', orders[0]?.trackingId, '510965337234');
   }
 
-  /* 9. 注文日：<time datetime>（兩種佈景主題都有），以及只擷取勾選的那幾筆 */
+  /* 9. 注文日：<time datetime>（兩種佈景主題都有），以及只讀七天內訂單的詳細頁 */
   {
     const s = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: serve(DAWN, DAWN_TOKEN) });
     const site = globalThis.OrderScraper.sites.find((x) => x.name === 'shopify');
@@ -169,75 +186,54 @@ module.exports = async function run() {
       ['2024-12-28', '2024-09-23']);
     void s; void custom;
 
-    // 勾選兩筆 → 只讀那兩筆的詳細頁（沒勾選時這一頁要讀 10 次）
-    const picked = setup(page(DAWN.list), `${DAWN.shop}/account`, { pages: serve(DAWN, DAWN_TOKEN) });
-    await picked.scrape({ orderIds: ['CHIIKAWA-4099569', 'CHIIKAWA-4748541'] });
-    c.eq('只讀勾選那幾筆的詳細頁',
-      picked.asked.filter((a) => a.url.includes('/account/orders/')).length, 2);
+    /* 一頁 10 筆，只有前 2 筆是七天內 → 只讀那 2 筆的詳細頁（以前這一頁要讀 10 次）。
+     * 舊訂單讀了也不會列出來，所以根本不去讀 */
+    const twoNew = setup(page(datedEach(DAWN.list, [1, 2, 30])), `${DAWN.shop}/account`, { pages: serve(DAWN, DAWN_TOKEN) });
+    await twoNew.scrape({ recentDays: 7 });
+    c.eq('只讀七天內那幾筆的詳細頁',
+      twoNew.asked.filter((a) => a.url.includes('/account/orders/')).length, 2);
   }
 
-  /* 10. 自動翻頁：Shopify 的帳戶頁吃 ?page=N，佈景主題沒畫分頁時直接把參數加一。
-   *     注文日要相對於「今天」才驗得準，所以把 <time> 全部換掉 —— 只動日期，其餘結構不變 */
+  /* 10. 自動翻頁：Shopify 的帳戶頁吃 ?page=N，佈景主題沒畫分頁時直接把參數加一 */
   {
-    const ymd = (daysAgo) => {
-      const d = new Date();
-      d.setHours(12, 0, 0, 0);
-      d.setDate(d.getDate() - daysAgo);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    };
-    const dated = (html, day) =>
-      html.replace(/<time[^>]*>[^<]*<\/time>/g, `<time datetime="${day}T00:00:00Z">${day}</time>`);
-    const renumber = (html, from, into) => html.replace(new RegExp(from, 'g'), into);
-
     const serveList = (byPage) => (url) => {
       const u = new URL(url);
       if (u.pathname === '/account') return byPage[Number(u.searchParams.get('page') || 1)] ?? '<table class="order-history"><tbody></tbody></table>';
       return serve(DAWN, DAWN_TOKEN)(url);
     };
 
-    // 兩頁都是新訂單 → 兩頁都要掃到，第 3 頁是空的就停
-    const p1 = dated(DAWN.list, ymd(1));
-    const p2 = renumber(dated(DAWN.list, ymd(2)), 'CHIIKAWA-4', 'CHIIKAWA-9');
-    const many = setup(page(p1), `${DAWN.shop}/account?page=1`, { pages: serveList({ 2: p2 }) });
-    const list = await many.preview();
-    c.eq('兩頁的訂單都掃到', list.orders.length, 20);
-    c.eq('第 2 頁的注文番号也在', list.orders.some((o) => o.orderId.startsWith('CHIIKAWA-9')), true);
-    c.eq('翻到空頁就停（第 3 頁）', list.pages, 3);
-    c.eq('掃列表時不讀詳細頁', many.asked.every((a) => !a.url.includes('/account/orders/')), true);
-    c.eq('翻頁走的是 ?page=', many.asked.map((a) => new URL(a.url).searchParams.get('page')), ['2', '3']);
+    const listPages = (s) => s.asked
+      .filter((a) => new URL(a.url).pathname === '/account')
+      .map((a) => new URL(a.url).searchParams.get('page'));
 
-    /* 勾選第 2 頁的訂單也擷取得到（preview 掃到的會留著給 scrape 用，
-     * 不然重新解析目前這一頁會找不到第 2 頁的訂單）。
-     * 這裡挑的是詳細頁 fixture 對應的那一筆（第 2 頁的注文番号只換了開頭的數字） */
-    const second = 'CHIIKAWA-9099569';
-    c.eq('第 2 頁確實有這一筆', list.orders.some((o) => o.orderId === second), true);
-    const picked = await many.scrape({ orderIds: [second] });
-    c.eq('擷取得到第 2 頁的訂單', picked.orders.length > 0, true);
-    c.eq('擷取的就是那一筆', [...new Set(picked.orders.map((o) => o.orderId))], [second]);
-    c.eq('伝票番号正確', picked.orders[0]?.trackingId, '510965337234');
+    /* 兩頁都是七天內 → 兩頁都要掃到，第 3 頁是空的就停。
+     * 第 2 頁是拿第 1 頁複製後改注文番号開頭的數字；連結沒改，所以會讀到同一份詳細頁 */
+    const p1 = dated(DAWN.list, 1);
+    const p2 = renumber(dated(DAWN.list, 2), 'CHIIKAWA-4', 'CHIIKAWA-9');
+    const many = setup(page(p1), `${DAWN.shop}/account?page=1`, { pages: serveList({ 2: p2 }) });
+    const both = await many.scrape({ recentDays: 7 });
+    c.eq('翻到空頁就停（第 3 頁）', both.pages, 3);
+    c.eq('翻頁走的是 ?page=', listPages(many), ['2', '3']);
+    c.eq('第 1、2 頁的包裹都擷取到', both.orders.map((o) => o.orderId), ['CHIIKAWA-4099569', 'CHIIKAWA-9099569']);
+    c.eq('第 2 頁的包裹也有配送資料', both.orders[1]?.trackingId, '510965337234');
 
     // 第 2 頁出現超過七天的訂單 → 不必再往下翻（列表是新到舊排的）
-    const stale = renumber(dated(DAWN.list, ymd(30)), 'CHIIKAWA-4', 'CHIIKAWA-8');
+    const stale = renumber(dated(DAWN.list, 30), 'CHIIKAWA-4', 'CHIIKAWA-8');
     const stop = setup(page(p1), `${DAWN.shop}/account?page=1`, { pages: serveList({ 2: stale }) });
-    const stopped = await stop.preview();
+    const stopped = await stop.scrape({ recentDays: 7 });
     c.eq('看到超過七天的就停在那一頁', stopped.pages, 2);
-    c.eq('沒有再去要第 3 頁', stop.asked.map((a) => new URL(a.url).searchParams.get('page')), ['2']);
-    c.eq('舊訂單有被標記起來', stopped.orders.filter((o) => o.old).length, 10);
+    c.eq('沒有再去要第 3 頁', listPages(stop), ['2']);
+    c.eq('超過七天的不列出來', stopped.orders.some((o) => o.orderId.startsWith('CHIIKAWA-8')), false);
 
     /* 第 1 頁就跨過七天的界線 → 連第 2 頁都不該去載。
      * 這是最常見的情況：一頁 10 筆，七天內通常只佔前面幾筆 */
-    const mixed = (() => {
-      const html = dated(DAWN.list, ymd(1));
-      const old = `<time datetime="${ymd(30)}T00:00:00Z">${ymd(30)}</time>`;
-      const start = html.lastIndexOf('<time');
-      return html.slice(0, start) + old + html.slice(html.indexOf('</time>', start) + '</time>'.length);
-    })();
-    const early = setup(page(mixed), `${DAWN.shop}/account?page=1`, { pages: serveList({ 2: p2 }) });
-    const stoppedEarly = await early.preview();
+    const early = setup(page(datedEach(DAWN.list, [1, 1, 1, 1, 1, 1, 1, 1, 1, 30])),
+      `${DAWN.shop}/account?page=1`, { pages: serveList({ 2: p2 }) });
+    const stoppedEarly = await early.scrape({ recentDays: 7 });
     c.eq('第一頁就看到超過七天的 → 不載下一頁', stoppedEarly.pages, 1);
-    c.eq('完全沒有多發請求', early.asked.length, 0);
-    c.eq('這一頁的訂單仍然全部掃到', stoppedEarly.orders.length, 10);
-    c.eq('其中一筆被標成舊的', stoppedEarly.orders.filter((o) => o.old).length, 1);
+    c.eq('沒有再去要任何列表頁', listPages(early), []);
+    c.eq('超過七天的那筆不讀詳細頁',
+      early.asked.filter((a) => a.url.includes('/account/orders/')).length, 9);
   }
 
   /* 11. 詳細頁全部讀不到時不輸出半筆（寧可留空也不要錯的資料） */
