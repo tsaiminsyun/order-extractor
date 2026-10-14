@@ -1,7 +1,8 @@
 /* popup：
  * - 支不支援目前的分頁，要由 content script 回答，不能用寫死的網域清單判斷
  *   （曾經因為網域清單沒有 chiikawamarket.jp，popup 連問都不問就停用擷取按鈕）
- * - 擷取前先列出這一頁的訂單讓使用者勾。只列七天內下單的，更舊的要按「顯示全部」才出來
+ * - 擷取前先列出這一頁的訂單讓使用者勾。**只列七天內下單的** ——
+ *   這個擴充功能只要配送中的訂單，七天前下的單多半已經到貨，沒有任何方式能把它們叫出來
  */
 const fs = require('fs');
 const path = require('path');
@@ -10,8 +11,8 @@ const { Check, JSDOM } = require('./harness.cjs');
 
 const ROOT = path.join(__dirname, '..');
 const POPUP_HTML = fs.readFileSync(path.join(ROOT, 'popup.html'), 'utf8');
-// popup.html 本來就有「擷取」「下載 JSON」「顯示全部」三顆，多出來的才是程式動態加的
-const BUILT_IN_BUTTONS = 3;
+// popup.html 本來就有「擷取」「下載 JSON」兩顆，多出來的才是程式動態加的
+const BUILT_IN_BUTTONS = 2;
 
 // 以今天為基準往回數 n 天。用中午建構，避開日光節約與時區跨日
 const day = (n) => {
@@ -67,14 +68,12 @@ async function openPopup({ tabUrl, pong, orders = [], injectFails = false, pingT
     d,
     boxes,
     fire,
-    toggle: d.getElementById('toggleOld'),
     scrapeBtn: d.getElementById('scrape'),
     get status() { return d.getElementById('status').textContent; },
     get isError() { return d.getElementById('status').classList.contains('error'); },
     get scrapeEnabled() { return !d.getElementById('scrape').disabled; },
     get scrapeLabel() { return d.getElementById('scrape').textContent; },
     get hint() { return d.getElementById('candidateHint').textContent; },
-    get toggleHidden() { return d.getElementById('toggleOld').classList.contains('hidden'); },
     get listed() { return boxes().map((b) => b.value); },
     get checked() { return boxes().filter((b) => b.checked).map((b) => b.value); },
     get extraButtons() { return d.querySelectorAll('button').length - BUILT_IN_BUTTONS; },
@@ -128,38 +127,28 @@ module.exports = async function run() {
     c.eq('日期不明的照樣列出來 —— 不知道就不要默默藏起來', p.listed.includes('沒日期'), true);
     c.eq('列出來的七天內訂單預設勾選', p.checked, ['今天', '第6天']);
     c.eq('日期不明的不預設勾選', p.checked.includes('沒日期'), false);
-    c.eq('說清楚藏了幾筆', p.hint, '3 / 5 筆（隱藏 2 筆更舊的）');
+    c.eq('提示寫出這一頁其實有幾筆', p.hint, '7 天內 3 筆（這一頁共 5 筆）');
+    c.eq('沒有任何按鈕可以把舊訂單叫出來', p.extraButtons, 0);
     c.eq('按鈕寫出勾了幾筆', p.scrapeLabel, '擷取選取的 2 筆');
   }
 
-  /* 4. 藏起來的舊訂單按「顯示全部」仍叫得出來，但不會自動勾選 */
+  /* 4. 第 7 天就是界線 */
   {
     const p = await openPopup({
       tabUrl: 'https://tower.jp/ec/Customer/Order/List',
       pong: TOWER,
-      orders: [order('新', day(1)), order('舊1', day(10)), order('舊2', day(60))],
+      orders: [order('第5天', day(5)), order('第6天', day(6)), order('第7天', day(7)), order('第8天', day(8))],
     });
-    c.eq('預設只看得到新的', p.listed, ['新']);
-    c.eq('有東西被藏起來時才出現切換鈕', [p.toggleHidden, p.toggle.textContent], [false, '顯示全部']);
-
-    p.toggle.click();
-    c.eq('顯示全部後舊的也列出來', p.listed, ['新', '舊1', '舊2']);
-    c.eq('叫出來的舊訂單不會自動勾選', p.checked, ['新']);
-    c.eq('切換鈕變成收回來', p.toggle.textContent, '只看 7 天內');
-    c.eq('提示不再說隱藏', p.hint, '3 / 3 筆');
-
-    p.toggle.click();
-    c.eq('再按一次就收回去', p.listed, ['新']);
+    c.eq('第 6 天還在，第 7 天開始不列', p.listed, ['第5天', '第6天']);
   }
 
-  /* 5. 這一頁本來就沒有更舊的訂單 → 不出現切換鈕 */
+  /* 5. 這一頁本來就沒有更舊的訂單 */
   {
     const p = await openPopup({
       tabUrl: 'https://tower.jp/ec/Customer/Order/List',
       pong: TOWER,
       orders: [order('C1', day(0)), order('C2', day(3))],
     });
-    c.eq('沒有東西被藏起來就不顯示切換鈕', p.toggleHidden, true);
     c.eq('提示只寫總筆數', p.hint, '共 2 筆');
   }
 
@@ -173,9 +162,7 @@ module.exports = async function run() {
     c.eq('一筆都不列', p.listed, []);
     c.eq('不能擷取', p.scrapeEnabled, false);
     c.eq('說明為什麼是空的', p.status, '這一頁沒有 7 天內的訂單（共 2 筆都更舊）');
-    c.eq('仍可按顯示全部叫出來', p.toggleHidden, false);
-    p.toggle.click();
-    c.eq('叫出來之後看得到', p.listed, ['D1', 'D2']);
+    c.eq('沒有任何按鈕可以把它們叫出來', p.extraButtons, 0);
   }
 
   /* 7. 勾選狀態改變時按鈕跟著更新；全部取消就不能擷取 */

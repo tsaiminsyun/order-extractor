@@ -10,7 +10,9 @@ const CONTENT_SCRIPTS = [
   "src/content/main.js",
 ];
 const PREVIEW_LIMIT = 100;
-// 預設勾選最近幾天下單的訂單（含今天）。其餘的仍會列出來，要不要擷取由使用者決定
+/* 這個擴充功能只要配送中的訂單。已送達的在認得出來的站台上就被擋掉了
+ * （見 README 的「只擷取配送中的訂單」），認不出來的站台改用「下單未滿幾天」當替代條件 ——
+ * 七天前下的單多半已經到貨。超過的一律不列出來 */
 const RECENT_DAYS = 7;
 
 const $ = (id) => document.getElementById(id);
@@ -20,7 +22,6 @@ const els = {
   candidates: $('candidates'),
   candidateList: $('candidateList'),
   candidateHint: $('candidateHint'),
-  toggleOld: $('toggleOld'),
   selectAll: $('selectAll'),
   scrape: $('scrape'),
   progress: $('progress'),
@@ -30,8 +31,7 @@ const els = {
 };
 
 let lastResult = null;
-let candidates = [];   // 這一頁上的全部訂單
-let showOld = false;   // 預設不列出七天前的訂單
+let candidates = [];   // 這一頁上的全部訂單（七天前的不會列出來）
 
 /* ---------- 小工具 ---------- */
 
@@ -73,7 +73,8 @@ const isRecent = (orderedAt) => {
   return days >= 0 && days < RECENT_DAYS;
 };
 
-// 「舊」要有日期才算得出來。日期不明的不當成舊的，照樣列出來 —— 不知道就不要默默藏起來
+// 「舊」要有日期才算得出來。日期不明的不當成舊的，照樣列出來（但不預設勾選）——
+// 站台改版導致日期抓不到時，訂單不該整批無聲消失
 const isOld = (orderedAt) => orderedAt != null && daysAgo(orderedAt) >= RECENT_DAYS;
 
 /* ---------- 分頁 ---------- */
@@ -137,25 +138,15 @@ function candidateRow(order) {
 }
 
 function renderCandidates() {
-  const hidden = candidates.filter((o) => isOld(o.orderedAt)).length;
-  const shown = showOld ? candidates : candidates.filter((o) => !isOld(o.orderedAt));
-
+  const shown = candidates.filter((o) => !isOld(o.orderedAt));
   els.candidateList.replaceChildren(...shown.map(candidateRow));
   els.candidates.classList.remove('hidden');
-  // 藏了東西就說清楚藏了幾筆，不要讓使用者以為訂單不見了
-  els.candidateHint.textContent = hidden
-    ? `${shown.length} / ${candidates.length} 筆${showOld ? '' : `（隱藏 ${hidden} 筆更舊的）`}`
-    : `共 ${candidates.length} 筆`;
-  // 這一頁本來就沒有更舊的訂單時，切換鈕不必出現
-  els.toggleOld.classList.toggle('hidden', !hidden);
-  els.toggleOld.textContent = showOld ? `只看 ${RECENT_DAYS} 天內` : '顯示全部';
+  // 這一頁還有幾筆更舊的只寫個數字，讓使用者知道不是解析漏了
+  els.candidateHint.textContent = shown.length === candidates.length
+    ? `共 ${candidates.length} 筆`
+    : `${RECENT_DAYS} 天內 ${shown.length} 筆（這一頁共 ${candidates.length} 筆）`;
   syncControls();
 }
-
-els.toggleOld.addEventListener('click', () => {
-  showOld = !showOld;
-  renderCandidates();
-});
 
 els.selectAll.addEventListener('change', () => {
   boxes().forEach((b) => { b.checked = els.selectAll.checked; });
@@ -254,7 +245,7 @@ async function checkTab() {
     }
     candidates = list.orders;
     renderCandidates();
-    // 整頁都是舊訂單時清單會是空的，要講清楚為什麼（按「顯示全部」仍叫得出來）
+    // 整頁都是舊訂單時清單會是空的，要講清楚為什麼
     if (!els.candidateList.children.length) {
       setStatus(`這一頁沒有 ${RECENT_DAYS} 天內的訂單（共 ${candidates.length} 筆都更舊）`, true);
     }
