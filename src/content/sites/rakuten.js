@@ -1,7 +1,7 @@
 /* 楽天市場 購入履歴（order.my.rakuten.co.jp）
  *
  * 樂天的 class 名稱帶雜湊（ellipsis--3QFZf），雜湊每次改版都會變，所以只比對前綴或用結構判斷。
- * 列表頁有：注文番号、商品（名稱 / 圖片），日文介面還有配送業者 / 伝票番号。
+ * 列表頁有：注文番号、商品（名稱 / 圖片），日文 / 繁中介面還有配送業者 / 伝票番号。
  * 合計（支払い金額）只在注文詳細頁，英文介面的列表頁連配送資訊都沒有，
  * 所以要擷取的訂單仍得載入一次詳細頁（該頁為前端渲染，用隱藏 iframe 載入後讀取）。
  */
@@ -20,20 +20,20 @@
   // 配送進度（ショップ → 出荷 → 配達店 → 配達完了）目前走到哪一步
   const ACTIVE_STEP = cls('item-shipping-active');
 
-  /* 標籤（日 / 英）。標籤後面可能什麼都沒有（值在隔壁元素），也可能直接接冒號跟值
+  /* 標籤（日 / 英 / 繁中）。標籤後面可能什麼都沒有（值在隔壁元素），也可能直接接冒號跟值
    * （「注文番号：297942-…」）。兩種都要認，但「配送業者を変更」這種就不能算 */
   const labelRe = (words) => new RegExp(`^(?:${words})(?:\\s*[:：]|\\s*$)`, 'i');
   const LABELS = {
-    carrier: labelRe('配送業者|shipping\\s*company'),
-    trackingId: labelRe('伝票番号|tracking\\s*number'),
-    orderedAt: labelRe('注文日|order\\s*date'),
+    carrier: labelRe('配送業者|物流業者|shipping\\s*company'),
+    trackingId: labelRe('伝票番号|運單號|tracking\\s*number'),
+    orderedAt: labelRe('注文日|訂單日期|order\\s*date'),
   };
 
   const idText = (el) => textOf(el).match(ORDER_ID_RE)?.[0] || null;
   /* 標籤有時跟號碼寫在同一個 span（「注文番号：297942-…」），有時分開（只有號碼）——
    * 兩種實際頁面都看過。去掉標籤之後整個元素剛好就是注文番号，才當成錨點；
    * 這樣才不會抓到包著一整張卡片的外層容器 */
-  const ID_LABEL_RE = /^\s*(?:注文番号|order\s*number)\s*[:：]?\s*/i;
+  const ID_LABEL_RE = /^\s*(?:注文番号|訂單編號|order\s*number)\s*[:：]?\s*/i;
   const exactId = (el) => {
     const text = clean(textOf(el).replace(ID_LABEL_RE, ''));
     return text && text === text.match(ORDER_ID_RE)?.[0] ? text : null;
@@ -63,7 +63,7 @@
     return [...byTitle.values()].sort(byDocumentOrder);
   }
 
-  // 列表頁是否顯示配送區塊。日文介面會顯示（出貨進度 / 配送業者 / 伝票番号），
+  // 列表頁是否顯示配送區塊。日文 / 繁中介面會顯示（出貨進度 / 配送業者 / 伝票番号），
   // 英文介面不顯示，這時只能進詳細頁才知道有沒有伝票番号
   const hasShippingBlock = (card) =>
     !!card.querySelector(SHIPPING_BLOCK) ||
@@ -99,7 +99,7 @@
     return valuesOf(LABELS.trackingId).map((trackingId, i) => ({ carrier: carriers[i] || carriers[0] || '', trackingId }));
   }
 
-  // 列表頁上的配送資訊（日文介面）。已送達的包裹整個略過；
+  // 列表頁上的配送資訊（日文 / 繁中介面）。已送達的包裹整個略過；
   // 認不出進度的（英文介面沒有進度列）一律保留，寧可多抓也不要漏掉在途的
   function readShipments(card) {
     const blocks = all(card, SHIPPING_BLOCK);

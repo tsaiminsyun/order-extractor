@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "訂單擷取（Amazon / 楽天 / Shopify / タワーレコード）",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "從 Amazon.co.jp、楽天市場、Shopify 商店、タワーレコード 的訂單列表擷取配送中的訂單，匯出 JSON",
   "action": {
     "default_popup": "popup.html",

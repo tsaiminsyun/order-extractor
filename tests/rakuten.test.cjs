@@ -4,8 +4,12 @@
  * rakuten-list-en.html    英文列表頁：一筆訂單、2 件商品，列表頁不顯示配送資訊
  * rakuten-detail-{jp,en}  注文詳細頁：合計 / 配送業者 / 伝票番号
  *
- * 日文那兩份的包裹都已送達，依規則不擷取（第 13 項驗這件事）。其他欄位的解析
+ * 日文那兩份的包裹都已送達，依規則不擷取（第 15 項驗這件事）。其他欄位的解析
  * 改用 inTransit() 處理過的版本，見下面的說明。
+ *
+ * rakuten-transit-list-{jp,tw}  改版後的列表頁，同一批 6 筆訂單各存一份日文 / 繁中，
+ *                               裡面有真的配送中的包裹，不需要 inTransit()（第 16 項起）
+ * rakuten-transit-detail-tw     其中一筆（配達中）的繁中注文詳細頁
  */
 const fs = require('fs');
 const path = require('path');
@@ -285,6 +289,70 @@ module.exports = async function run() {
 
     // 不能用文字判斷：「配達完了」是進度列最後一步的名稱，配送中的頁面一樣有這四個字
     c.eq('配送中的頁面同樣有「配達完了」字樣', LIST.jp.includes('配達完了'), true);
+  }
+
+  /* 16. 繁中介面。樂天的繁中介面版面跟日文完全一樣，只換了標籤文字：
+   *       注文番号 → 訂單編號、注文日 → 訂單日期、配送業者 → 物流業者、伝票番号 → 運單號
+   *     同一批 6 筆訂單（實際頁面）：
+   *       313488 配達中（ヤマト運輸）    429960 発送済（業者「その他」）    437635 日本郵便
+   *       369108 ショップ確認中（沒有運單號）  433765 発送済但沒有運單號  420802 配達完了 */
+  const TRANSIT = { jp: fixture('rakuten-transit-list-jp.html'), tw: fixture('rakuten-transit-list-tw.html') };
+  const TRANSIT_DETAIL_TW = fixture('rakuten-transit-detail-tw.html');
+  // 詳細頁只存了 313488 這一筆，另外兩筆當作讀不到（合計留空）
+  const transitDetail = (url) => (url.includes('313488-20261012-0265510325') ? TRANSIT_DETAIL_TW : null);
+  const MIZUNO = 'ミズノ公式 ワークウエア 作業着 作業服 作業ズボン ストレッチ撥水カーゴパンツ 制電/ワーキング メンズ 春夏用 おしゃれ かっこいい グレー×ベージュ';
+  {
+    const { scrape, asked } = setup(TRANSIT.tw, URL_LIST, { pages: transitDetail });
+    const scanned = globalThis.OrderScraper.sites.find((s) => s.name === 'rakuten').findOrders(document, URL_LIST);
+    c.eq('繁中列表頁：6 筆訂單都認得出來（訂單編號）', scanned.length, 6);
+
+    const res = await scrape();
+    c.eq('繁中：只列出 3 個有運單號、配送中的包裹（物流業者 / 運單號）',
+      res.orders.map((o) => [o.orderId, o.carrier, o.trackingId]), [
+        ['313488-20261012-0265510325', 'ヤマト運輸', '507010735733'],
+        ['429960-20261012-0898510064', 'その他', '443294351172'],
+        ['437635-20261011-0798110242', '日本郵便', '281728870614'],
+      ]);
+    c.eq('繁中：注文日（訂單日期：2026/10/12(一)）', res.orders.map((o) => o.orderedAt), ['2026-10-12', '2026-10-12', '2026-10-11']);
+    c.eq('繁中：合計取自詳細頁的「付款金額」', res.orders.map((o) => o.total), [9900, null, null]);
+    c.eq('繁中：品名', res.orders[0]?.items.map((i) => [i.title, i.quantity]), [[MIZUNO, 1]]);
+    c.eq('確認中 / 沒運單號 / 配達完了的三筆不載入詳細頁',
+      asked.map((a) => a.url.match(/order_number=(\d+)/)[1]), ['313488', '429960', '437635']);
+    c.eq('配達完了那筆頁面上確實有運單號（是被進度列擋掉的）', TRANSIT.tw.includes('767123766102'), true);
+
+    // 同一批訂單的日文版要讀到一模一樣的結果（不含要另外載入的頁面）
+    const plain = (html) => {
+      setup(html, URL_LIST);
+      return globalThis.OrderScraper.sites.find((s) => s.name === 'rakuten').findOrders(document, URL_LIST)
+        .map(({ lookups, ...o }) => ({ ...o, lookups: lookups.map((l) => l.url) }));
+    };
+    const jp = plain(TRANSIT.jp);
+    c.eq('日文版同樣是 6 筆', jp.length, 6);
+    c.eq('繁中與日文讀到一樣的結果', plain(TRANSIT.tw), jp);
+  }
+
+  /* 17. 繁中詳細頁：付款金額 / 數量 / 物流業者 / 運單號 */
+  {
+    loadReaders();
+    const info = await globalThis.OrderScraper.readers.rakutenDetail(new JSDOM(TRANSIT_DETAIL_TW).window.document);
+    c.eq('繁中詳細頁：合計（付款金額）', info.total, 9900);
+    c.eq('繁中詳細頁：配達中不算已送達', info.delivered, false);
+    c.eq('繁中詳細頁：一個包裹（物流業者 / 運單號）', info.shipments, [{ carrier: 'ヤマト運輸', trackingId: '507010735733' }]);
+    c.eq('繁中詳細頁：數量', info.quantities.map((q) => [q.title, q.quantity]), [[MIZUNO, 1]]);
+  }
+
+  /* 18. 認不得標籤時的後備規則（業者查詢頁的連結）：同一個運單號只算一個包裹。
+   *     繁中詳細頁上「變更取件地點與時間」按鈕跟業者名稱連到同一個黑貓查詢網址，
+   *     以前會多出一個業者叫「變更取件地點與時間」的假包裹。
+   *     這裡把兩個標籤換成認不得的字，模擬沒見過的語系 */
+  {
+    loadReaders();
+    const html = TRANSIT_DETAIL_TW.split('>物流業者<').join('>LABEL-A<').split('>運單號<').join('>LABEL-B<');
+    c.eq('標籤確實換掉了', /物流業者|運單號/.test(html), false);
+    c.eq('頁面上同一個運單號有兩個連結', TRANSIT_DETAIL_TW.split('no01=507010735733').length - 1, 2);
+    const info = await globalThis.OrderScraper.readers.rakutenDetail(new JSDOM(html).window.document);
+    c.eq('後備規則：只有一個包裹，業者名稱取第一個連結',
+      info.shipments, [{ carrier: 'ヤマト運輸', trackingId: '507010735733' }]);
   }
 
   return c.report();

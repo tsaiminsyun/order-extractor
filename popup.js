@@ -121,8 +121,8 @@ function parcelRow(parcel, index) {
 
 function render() {
   const table = el('table');
-  table.innerHTML = '<thead><tr><th class="pick"></th><th class="c-id">注文番号</th><th>品名</th>'
-    + '<th class="c-total">合計</th><th class="c-ship">配送業者 / ID</th></tr></thead>';
+  table.innerHTML = '<thead><tr><th class="pick"></th><th class="c-id">訂單編號</th><th>品名</th>'
+    + '<th class="c-total">合計</th><th class="c-ship">物流業者 / 運單號</th></tr></thead>';
   const tbody = el('tbody');
   tbody.append(...result.orders.map(parcelRow));
   table.append(tbody);

@@ -1,7 +1,7 @@
 /* popup：
  * - 支不支援目前的分頁，要由 content script 回答，不能用寫死的網域清單判斷
  *   （曾經因為網域清單沒有 chiikawamarket.jp，popup 連問都不問就停用擷取按鈕）
- * - 一打開就整套跑完：表格上就是最終結果（注文番号 / 品名 / 合計 / 配送業者・ID），
+ * - 一打開就整套跑完：表格上就是最終結果（訂單編號 / 品名 / 合計 / 物流業者・運單號），
  *   每一列可以勾選，按「下載 JSON」只下載勾選的那幾列。中間沒有「擷取」這一步
  */
 const fs = require('fs');
@@ -104,8 +104,8 @@ module.exports = async function run() {
     c.eq('打開就送出擷取', p.sent.some((m) => m.type === 'SCRAPE'), true);
     c.eq('沒有「擷取」按鈕，只有下載', p.d.getElementById('scrape'), null);
     c.eq('狀態顯示站台名稱', p.status, '已就緒（Shopify 商店）');
-    c.eq('欄位依序是 注文番号 / 品名 / 合計 / 配送業者・ID',
-      p.headers.slice(1), ['注文番号', '品名', '合計', '配送業者 / ID']);
+    c.eq('欄位依序是 訂單編號 / 品名 / 合計 / 物流業者・運單號',
+      p.headers.slice(1), ['訂單編號', '品名', '合計', '物流業者 / 運單號']);
     c.eq('一個包裹一列', p.rows.length, 2);
     c.eq('每一列都有 checkbox', p.boxes().length, 2);
   }
@@ -122,11 +122,11 @@ module.exports = async function run() {
       })]),
     });
     const cells = [...p.rows[0].querySelectorAll('td')].map((td) => td.textContent.trim());
-    c.eq('注文番号', cells[1], 'B1');
+    c.eq('訂單編號', cells[1], 'B1');
     c.eq('品名一件一行，2 件以上才標數量',
       [...p.rows[0].querySelectorAll('.title')].map((t) => t.textContent), ['ステッカー', 'マスコット ×3']);
     c.eq('合計', cells[3], '¥3,410');
-    c.eq('配送業者 / ID', cells[4], 'Yamato (JA) 510965337234');
+    c.eq('物流業者 / 運單號', cells[4], 'Yamato (JA) 510965337234');
   }
 
   /* 3. 預設全部勾選，下載按鈕寫出筆數 */

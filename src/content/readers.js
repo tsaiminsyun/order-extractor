@@ -75,12 +75,12 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
   /* ---------- 楽天：注文詳細頁 ---------- */
 
-  // 詳細頁的標籤（日 / 英）。合計要取「支払い金額」，避開小計與送料
+  // 詳細頁的標籤（日 / 英 / 繁中）。合計要取「支払い金額」，避開小計與送料
   const RAKUTEN_LABELS = {
-    total: /^(?:支払い?金額|お支払い?金額|ご請求金額|total\s*amount)$/i,
-    carrier: /^(?:配送業者|shipping\s*company)$/i,
-    trackingId: /^(?:伝票番号|tracking\s*number)$/i,
-    quantity: /^(?:数量|個数|quantity)\s*[:：]?$/i,
+    total: /^(?:支払い?金額|お支払い?金額|ご請求金額|付款金額|total\s*amount)$/i,
+    carrier: /^(?:配送業者|物流業者|shipping\s*company)$/i,
+    trackingId: /^(?:伝票番号|運單號|tracking\s*number)$/i,
+    quantity: /^(?:数量|個数|數量|quantity)\s*[:：]?$/i,
   };
 
   const RAKUTEN_ITEM_LINK = 'a[href*="item.rakuten.co.jp"]';
@@ -118,12 +118,16 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
   // 認不得標籤時（其他語系）的後備：配送業者是連到業者查詢頁的外部連結，aria-label 就是業者名。
   // 範圍一定要限制在出貨狀態區塊內：頁面別處的活動連結（例如「○倍の注意点」）同樣是
-  // 帶長數字的外部連結，不限制範圍就會被當成配送業者，產生假的伝票番号
-  const carrierLinks = (block) =>
-    all(block, 'a[href^="http"]')
+  // 帶長數字的外部連結，不限制範圍就會被當成配送業者，產生假的伝票番号。
+  // 同一個伝票番号也可能有好幾個連結：業者名稱本身之外，「變更取件地點與時間」這類按鈕
+  // 一樣連到業者的查詢頁（繁中頁實際看過）。同一個伝票番号就是同一個包裹，只留第一個 —— 業者名稱排在前面
+  const carrierLinks = (block) => {
+    const seen = new Set();
+    return all(block, 'a[href^="http"]')
       .filter((a) => isExternal(attr(a, 'href')))
       .map((a) => ({ carrier: clean(attr(a, 'aria-label')), trackingId: trackingInHref(attr(a, 'href')) }))
-      .filter((s) => s.carrier && s.trackingId);
+      .filter((s) => s.carrier && s.trackingId && !seen.has(s.trackingId) && seen.add(s.trackingId));
+  };
 
   // 一筆訂單可能有多個伝票番号（分批出貨），依出現順序配對。
   // block 為真時才用連結後備 —— 那個後備一定要限制在出貨狀態區塊內（見上面的註解）
