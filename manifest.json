@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "訂單擷取（Amazon / 楽天 / Shopify / タワーレコード）",
-  "version": "0.21.0",
-  "description": "從 Amazon.co.jp、楽天市場、Shopify 商店、タワーレコード 的訂單列表擷取配送中的訂單，匯出 JSON",
+  "name": "訂單擷取（Amazon / 楽天 / Shopify / タワーレコード / ポケモンセンター）",
+  "version": "0.22.0",
+  "description": "從 Amazon.co.jp、楽天市場、Shopify 商店、タワーレコード、ポケモンセンターオンライン 的訂單列表擷取配送中的訂單，匯出 JSON",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "訂單擷取（Amazon / 楽天 / Shopify / タワーレコード）"
+    "default_title": "訂單擷取（Amazon / 楽天 / Shopify / タワーレコード / ポケモンセンター）"
   },
   "permissions": [
     "activeTab",
@@ -45,6 +45,7 @@
         "src/content/sites/rakuten.js",
         "src/content/sites/shopify.js",
         "src/content/sites/tower.js",
+        "src/content/sites/pokemoncenter.js",
         "src/content/main.js"
       ],
       "run_at": "document_idle"

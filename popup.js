@@ -7,6 +7,7 @@ const CONTENT_SCRIPTS = [
   "src/content/sites/rakuten.js",
   "src/content/sites/shopify.js",
   "src/content/sites/tower.js",
+  "src/content/sites/pokemoncenter.js",
   "src/content/main.js",
 ];
 

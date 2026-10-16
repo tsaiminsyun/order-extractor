@@ -9,7 +9,7 @@
  */
 (() => {
   'use strict';
-  const { clean, textOf, attr, all, parseMoney, parseDate, nextPageLink } = globalThis.OrderScraper.util;
+  const { clean, textOf, attr, all, parseMoney, parseDate, carrierOf, nextPageLink } = globalThis.OrderScraper.util;
 
   const SEL = {
     box: '.deliveryBox',
@@ -31,17 +31,8 @@
    * 讀不到狀態時當成配送中保留 —— 漏抓在途的包裹比多抓已送達的嚴重 */
   const isDelivered = (box) => /受取済/.test(textOf(box.querySelector(SEL.status)));
 
-  /* 配送業者由伝票番号的查詢網址判斷。頁面上也有「配送業者」欄位，但那是下單時的
+  /* 配送業者由伝票番号的查詢網址判斷（util.carrierOf）。頁面上也有「配送業者」欄位，但那是下單時的
    * 指定（實際頁面上是「指定なし」），不是真正送件的業者，不能拿來用 */
-  const CARRIERS = [
-    [/(^|\.)japanpost\.jp$/, '日本郵便'],
-    [/(^|\.)kuronekoyamato\.co\.jp$/, 'ヤマト運輸'],
-    [/(^|\.)sagawa-exp\.co\.jp$/, '佐川急便'],
-  ];
-  const carrierOf = (href) => {
-    try { return CARRIERS.find(([host]) => host.test(new URL(href).hostname))?.[1] || ''; }
-    catch { return ''; }
-  };
 
   /* ---------- 欄位 ---------- */
 

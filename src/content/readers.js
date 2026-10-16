@@ -8,7 +8,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
 (() => {
   'use strict';
-  const { sleep, clean, attr, all, cls, parseMoney, climbUnique } = globalThis.OrderScraper.util;
+  const { sleep, clean, textOf, attr, all, cls, parseMoney, carrierOf, climbUnique } = globalThis.OrderScraper.util;
 
   const RENDER_TIMEOUT_MS = 15000; // 等待前端渲染的上限
   const PARTIAL_WAIT_MS = 2000;    // 只出現部分欄位時，再等其他欄位的時間
@@ -288,5 +288,58 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     const items = shopifyItems(doc, base);
     await shopifyImages(items, base);
     return { ok: true, total: shopifyTotal(doc), items };
+  };
+
+  /* ---------- ポケモンセンター：注文詳細頁（/order-details/?orderID=…） ---------- */
+
+  /* 伺服器渲染，fetch 取回就讀得到，不必等。
+   *   送り状番号  <dt>送り状番号</dt><dd>5040-1844-1522<br></dd>
+   *   配送業者    「配送状況を確認する」連到業者的查詢頁，由網域判斷（util.carrierOf）
+   *   商品        .comPriceList 一件一個 li，個数是停用的 <select aria-label="個数">。
+   *               特典（キャンペーン景品）也列在這裡、一樣有個数，會跟著包裹寄來，所以照列
+   *   合計        「支払合計」（避開商品合計 / 送料 / 手数料） */
+  const pokemonValue = (doc, label) => all(doc, 'dt').find((dt) => textOf(dt) === label)?.nextElementSibling;
+
+  // dd 裡一行一個（<br> 分隔）。號碼之間不一定有空白，所以不能用 textContent 再切
+  const linesOf = (el) => {
+    if (!el) return [];
+    const lines = [''];
+    for (const node of el.childNodes) {
+      if (node.nodeName === 'BR') lines.push('');
+      else lines[lines.length - 1] += node.textContent;
+    }
+    return lines.map(clean).filter(Boolean);
+  };
+
+  /* 頁面上顯示成 5040-1844-1522，業者查詢網址用的是 504018441522。
+   * 其他站台的伝票番号也都是純數字，所以去掉連字號，WMS 那邊才對得起來 */
+  function pokemonShipments(doc) {
+    const trackers = all(doc, 'a[href^="http"]').map((a) => attr(a, 'href')).filter(carrierOf);
+    return linesOf(pokemonValue(doc, '送り状番号'))
+      .map((line) => line.replace(/-/g, ''))
+      .filter((no) => /^[A-Za-z0-9]{8,}$/.test(no))
+      // 有好幾個包裹時，業者取網址裡帶著這個號碼的查詢連結；找不到就用第一個
+      .map((trackingId) => ({ carrier: carrierOf(trackers.find((h) => h.includes(trackingId)) || trackers[0] || ''), trackingId }));
+  }
+
+  const pokemonItems = (doc) =>
+    all(doc, '.comPriceList > li')
+      .map((li) => {
+        const img = li.querySelector('.pho img');
+        return {
+          title: textOf(li.querySelector('.ttl')) || clean(attr(img, 'alt')),
+          quantity: Number(li.querySelector('select[aria-label="個数"]')?.value) || 1,
+          imageUrl: attr(img, 'src') || null,
+        };
+      })
+      .filter((item) => item.title);
+
+  const pokemonTotal = (doc) =>
+    parseMoney(textOf(all(doc, '.comPriceAll p').find((p) => textOf(p.querySelector('.txt')) === '支払合計')?.querySelector('.price')));
+
+  globalThis.OrderScraper.readers.pokemonDetail = async (doc) => {
+    // 登入逾時會被導到登入頁
+    if (doc.querySelector('input[type="password"]')) return { signIn: true };
+    return { ok: true, total: pokemonTotal(doc), shipments: pokemonShipments(doc), items: pokemonItems(doc) };
   };
 })();

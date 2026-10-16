@@ -57,6 +57,11 @@ module.exports = async function run() {
       ['.deliveryBox', 'src/content/sites/tower.js'],
       ['.ship-num', 'src/content/sites/tower.js'],
       ['受取済', 'src/content/sites/tower.js'],
+      ['.comOrderList', 'src/content/sites/pokemoncenter.js'],
+      ['/order-details/', 'src/content/sites/pokemoncenter.js'],
+      ['送り状番号', 'src/content/readers.js'],
+      ['支払合計', 'src/content/readers.js'],
+      ['select[aria-label="個数"]', 'src/content/readers.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

@@ -26,7 +26,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -37,6 +37,7 @@ patch('src/content/sites/amazon.js', "/(^|\\.)amazon\\.co\\.jp$/.test(loc.hostna
 patch('src/content/sites/rakuten.js', "/(^|\\.)rakuten\\.co\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/rakuten.js', "'https://order.my.rakuten.co.jp/purchase-history/'", `'${ORIGIN}/purchase-history/'`);
 patch('src/content/sites/tower.js', "/(^|\\.)tower\\.jp$/.test(loc.hostname)", 'true');
+patch('src/content/sites/pokemoncenter.js', "/(^|\\.)pokemoncenter-online\\.com$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -168,6 +169,45 @@ const towerBox = (no, tracking, received) => `<div class="deliveryBox">
 </div>`;
 const towerList = `<!doctype html><html><body>${towerBox(1, TOWER_TRACK[1], false)}${towerBox(2, '', false)}${towerBox(3, '320443645499', true)}</body></html>`;
 
+/* ---------- 模擬 ポケモンセンター（伺服器渲染 → 詳細頁走 fetch） ----------
+ * 結構照實際頁面（tests/fixtures/pokemoncenter-*）。三筆訂單：
+ *   PC1 一天前、発送済み → 讀詳細頁、列出
+ *   PC2 兩天前、注文受付済み → 不讀詳細頁
+ *   PC3 三十天前、発送済み → 超過七天，不讀詳細頁 */
+const POKEMON = { PC1: [1, true], PC2: [2, false], PC3: [30, true] };
+const POKEMON_ID = { PC1: '3000000000001', PC2: '3000000000002', PC3: '3000000000003' };
+const pcDate = (daysAgo) => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return `${d.getFullYear()}年${String(d.getMonth() + 1).padStart(2, '0')}月 ${String(d.getDate()).padStart(2, '0')}日（木）`;
+};
+const pokemonRow = (key) => {
+  const [age, shipped] = POKEMON[key];
+  const step = (i, label) => `<li${(shipped ? i === 2 : i === 0) ? ' class="finish"' : ''}>${label}</li>`;
+  return `<li>
+  <div class="subBox"><p class="time">${pcDate(age)}<span>10時17分</span></p>
+    <div class="comReceiptBox${shipped ? ' sent' : ''}"><ul class="txtList">${step(0, '注文受付済み')}${step(1, '発送準備中')}${step(2, '発送済み')}</ul></div></div>
+  <div class="txtBox"><div class="rBox"><p class="number">注文番号<span>${POKEMON_ID[key]}</span></p><p class="ttl">ぬいぐるみ パモ</p></div>
+    <div class="comBtn"><a href="/order-details/?orderID=${POKEMON_ID[key]}&amp;page=1">注文詳細・各種手続き</a></div></div>
+</li>`;
+};
+const pokemonList = `<!doctype html><html><body><ul class="comOrderList">${['PC1', 'PC2', 'PC3'].map(pokemonRow).join('')}</ul></body></html>`;
+const pokemonDetail = `<!doctype html><html><body><!-- dwMarker="content" -->
+<dl class="info_list">
+  <div class="-item"><dt class="-ttl">注文番号</dt><dd class="-data">${POKEMON_ID.PC1}</dd></div>
+  <div class="-item mt"><dt class="-ttl">送り状番号</dt><dd class="-data">5040-1844-1522<br /></dd></div>
+</dl>
+<div class="linkBox"><a href="https://member.kms.kuronekoyamato.co.jp/parcel/detail?pno=504018441522" target="_blank"><span>配送状況を確認する</span></a></div>
+<ul class="comPriceList"><li class="list01">
+  <div class="pho"><img src="https://www.pokemoncenter-online.com/a/img/item/1/S/a.jpg" alt="ぬいぐるみ パモ"></div>
+  <div class="txtBox"><a class="ttl ttl02" href="/1.html">ぬいぐるみ パモ</a>
+    <select name="num06" disabled aria-label="個数"><option value="2">2</option></select></div>
+</li></ul>
+<div class="comPriceAll">
+  <p class="btmText"><span class="txt">商品合計</span><span class="price"><span class="lato"> 7,920 </span>円<small>税込</small></span></p>
+  <p class="tText payAll"><span class="txt">支払合計</span><span class="price"><span class="lato"> 8,470 </span>円<small>税込</small></span></p>
+</div></body></html>`;
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -183,6 +223,7 @@ const shopifyEmpty = `<!doctype html><html><head>
 
 const hits = [];
 const trackerHits = [];  // 讀了哪幾個包裹的配送狀況頁
+const pokemonHits = [];  // 讀了哪幾筆ポケモンセンター的詳細頁
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, ORIGIN);
   hits.push(u.pathname);
@@ -204,6 +245,13 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ title: 'ぬいぐるみA', featured_image: '//cdn.example.com/plush-a.jpg' }));
   }
   if (u.pathname === '/ec/Customer/Order/List') return res.end(towerList);
+  if (u.pathname === '/order-history/') return res.end(pokemonList);
+  if (u.pathname === '/order-details/') {
+    pokemonHits.push(u.searchParams.get('orderID'));
+    // fetch 不受 X-Frame-Options 影響：三種模式結果都該一樣
+    if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
+    return res.end(u.searchParams.get('orderID') === POKEMON_ID.PC1 ? pokemonDetail : '');
+  }
   if (u.pathname === '/purchase-history/order-list/') return res.end(rakutenList);
   if (u.pathname === '/purchase-history/') {
     if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
@@ -304,8 +352,21 @@ const eq = (label, actual, expected) => {
       eq('タワー 不另外載入頁面', hits.slice(before), ['/ec/Customer/Order/List']);
     }
 
+    // ポケモンセンター（伺服器渲染 → 詳細頁走 fetch，X-Frame-Options 擋不到）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/order-history/`);
+      console.log(`ポケモンセンター：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('ポケモン 站台', result.site, 'pokemoncenter');
+      eq('ポケモン 只讀七天內発送済み那筆的詳細頁', pokemonHits, [POKEMON_ID.PC1]);
+      eq('ポケモン 列出那筆', result.orders.map((o) => [o.orderId, o.orderedAt]), [[POKEMON_ID.PC1, isoDate(1)]]);
+      eq('ポケモン 配送業者 / 送り状番号（去掉連字號）', result.orders.map((o) => [o.carrier, o.trackingId]), [['ヤマト運輸', '504018441522']]);
+      eq('ポケモン 合計（支払合計）', result.orders[0]?.total, 8470);
+      eq('ポケモン 品名 / 個数 / 画像', result.orders[0]?.items.map((i) => [i.title, i.quantity, i.imageUrl]),
+        [['ぬいぐるみ パモ', 2, 'https://www.pokemoncenter-online.com/a/img/item/1/S/a.jpg']]);
+    }
+
     // 只用 iframe，任何情況都不該開新分頁
-    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?/.test(u));
+    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details/.test(u));
     console.log(`另開的分頁：${extra.length} 個`);
     eq('不開新分頁', extra, []);
     eq('沒有背景程式', (await browser.targets()).some((t) => t.type() === 'service_worker'), false);

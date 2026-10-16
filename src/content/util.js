@@ -27,6 +27,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
    *   2026-10-05T14:53:07Z   Shopify 的 <time datetime>
    *   2026/10/08、2026/09/18(金)、2026/09/29 (Tuesday)   タワーレコード / 楽天
    *   2026年8月21日                                      Amazon 日本語 / 简体中文
+   *   2026年09月 10日（木）                               ポケモンセンター（月和日中間有空格）
    *   August 21, 2026                                    Amazon English */
   const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
     'july', 'august', 'september', 'october', 'november', 'december'];
@@ -40,7 +41,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     if (!str) return null;
     const iso = str.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
     if (iso) return ymd(iso[1], iso[2], iso[3]);
-    const slash = str.match(/(\d{4})[/年](\d{1,2})[/月](\d{1,2})/);
+    const slash = str.match(/(\d{4})\s*[/年]\s*(\d{1,2})\s*[/月]\s*(\d{1,2})/);
     if (slash) return ymd(slash[1], slash[2], slash[3]);
     const named = str.match(/([A-Za-z]{3,})\s+(\d{1,2}),?\s*(\d{4})/);
     if (named) {
@@ -49,6 +50,18 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     }
     return null;
   }
+
+  /* 配送業者由查詢網址的網域判斷（タワーレコード、ポケモンセンター）。
+   * 子網域不固定（ポケモンセンター連的是 member.kms.kuronekoyamato.co.jp），所以比對結尾 */
+  const CARRIER_HOSTS = [
+    [/(^|\.)japanpost\.jp$/, '日本郵便'],
+    [/(^|\.)kuronekoyamato\.co\.jp$/, 'ヤマト運輸'],
+    [/(^|\.)sagawa-exp\.co\.jp$/, '佐川急便'],
+  ];
+  const carrierOf = (href) => {
+    try { return CARRIER_HOSTS.find(([host]) => host.test(new URL(href).hostname))?.[1] || ''; }
+    catch { return ''; }
+  };
 
   const absUrl = (href, base) => {
     try { return href ? new URL(href, base).href : null; } catch { return null; }
@@ -179,7 +192,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
   }
 
   globalThis.OrderScraper.util = {
-    sleep, clean, textOf, attr, all, cls, parseMoney, parseDate, absUrl,
+    sleep, clean, textOf, attr, all, cls, parseMoney, parseDate, carrierOf, absUrl,
     nextPageLink, bumpPageParam,
     climbUnique, countContained, countMatches, outermost, byDocumentOrder,
     countOrderIds, cardsByOrderId,
