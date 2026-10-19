@@ -66,6 +66,10 @@ module.exports = async function run() {
       ['着荷済', 'src/content/sites/nijisanji.js'],
       ['配送伝票番号', 'src/content/readers.js'],
       ['.cartitem-count-text', 'src/content/readers.js'],
+      ['.order-tracking__timeline', 'src/content/sites/animate.js'],
+      ['.order_slip_number a', 'src/content/sites/animate.js'],
+      ['.order_item_privilege_name', 'src/content/sites/animate.js'],
+      ['.my-pager .next a', 'src/content/sites/animate.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

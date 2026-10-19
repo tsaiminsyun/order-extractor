@@ -39,6 +39,7 @@ patch('src/content/sites/rakuten.js', "'https://order.my.rakuten.co.jp/purchase-
 patch('src/content/sites/tower.js', "/(^|\\.)tower\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/pokemoncenter.js', "/(^|\\.)pokemoncenter-online\\.com$/.test(loc.hostname)", 'true');
 patch('src/content/sites/nijisanji.js', "/(^|\\.)shop\\.nijisanji\\.jp$/.test(loc.hostname)", 'true');
+patch('src/content/sites/animate.js', "/(^|\\.)animate-onlineshop\\.jp$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -246,6 +247,40 @@ const nijiDetail = `<!doctype html><html><body>
   <h4 class="heading heading4">配送伝票番号</h4><span>366129410824</span></div></div>
 </body></html>`;
 
+/* ---------- 模擬 アニメイト通販（全部欄位都在列表頁；分頁是「次へ>>」） ----------
+ * 結構照實際頁面（tests/fixtures/animate-*）。
+ *   第 1 頁：AN1 一天前、出荷作業中 → 列出；AN2 兩天前、お届け済 → 已送達不列
+ *   第 2 頁：AN3 三天前、出荷作業中 → 列出 */
+const ANIMATE = { AN1: [1, false, '266000000001'], AN2: [2, true, '266000000002'], AN3: [3, false, '266000000003'] };
+const ANIMATE_ID = { AN1: '55000001', AN2: '55000002', AN3: '55000003' };
+const anDate = (daysAgo) => isoDate(daysAgo).replace(/-/g, '/');
+const animateOrder = (key) => {
+  const [age, delivered, slip] = ANIMATE[key];
+  const track = `javascript: window.open('https://trackings.post.japanpost.jp/services/srv/search/?requestNo1=${slip}', '_blank');`;
+  return `<div class="order_histories"><div class="order">
+  <p class="order__date">注文日　${anDate(age)}</p>
+  <div class="order_status"><p class="order_id"><span>注文番号　</span>${ANIMATE_ID[key]}</p>
+    <p class="order_slip_number"><span>配送伝票番号　<a href="#" onclick="${track}">${slip}</a></span></p><p class="order_contact"></p></div>
+  <div class="order-tracking"><ol class="order-tracking__timeline">
+    <li class="prev">注文受付</li><li class="prev">お支払い</li><li class="prev">商品準備中</li>
+    <li class="${delivered ? 'prev' : 'current'}">出荷作業中</li><li${delivered ? ' class="current"' : ''}>お届け済</li></ol></div>
+  <div class="order_inner">
+    <div class="order_item"><div class="order_item_image"><a href="/pd/1/"><img src="https://tc-animate.techorus-cdn.com/resize_image/resize_image.php?image=a.jpg" alt="【グッズ】アクリルスタンド"></a></div>
+      <div class="order_item_info"><div><h3 class="pb5 text-blue"><a class="text-blue" href="/pd/1/">【グッズ】アクリルスタンド</a></h3>
+        <div class="d-flex"><p class="order_item_price me-3">2点</p><p class="order_item_price">3,300円</p></div></div></div></div>
+    <div class="order_item order_item_privilege"><h3 class="order_item_privilege_title">この受注に付与される特典</h3>
+      <div class="order_item_privilege_name">&nbsp;ミニフォト</div><div class="order_item_privilege_quantity">1点</div></div>
+  </div>
+  <div class="order_detail_wrap" style="display: none"><div class="order_bill"><table><tbody>
+    <tr><td>商品小計</td><td>3,300円</td></tr><tr class="total"><td>注文合計金額</td><td>3,894円</td></tr>
+  </tbody></table></div></div>
+</div></div>`;
+};
+const animatePager = '<div class="my-pager"><ul><li class="current"><a href="#">1</a></li><li><a href="/mypage/history.php?pageno=2&amp;order_period=1&amp;ss=1">2</a></li></ul>'
+  + '<p class="next"><a href="/mypage/history.php?pageno=2&amp;order_period=1&amp;ss=1">次へ&gt;&gt;</a></p></div>';
+const animateList = (n) => `<!doctype html><html><body><section>${n === 1 ? animateOrder('AN1') + animateOrder('AN2') + animatePager : animateOrder('AN3')}</section></body></html>`;
+const animateHits = [];  // 讀了アニメイト的哪幾頁
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -286,6 +321,10 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/ec/Customer/Order/List') return res.end(towerList);
   if (u.pathname === '/order-history/') return res.end(pokemonList);
   if (u.pathname === '/mypage/order-history') return res.end(nijiList);
+  if (u.pathname === '/mypage/history.php') {
+    animateHits.push(u.search);
+    return res.end(animateList(Number(u.searchParams.get('pageno') || 1)));
+  }
   if (u.pathname === '/mypage/order-history/detail') {
     nijiHits.push(u.searchParams.get('orderID'));
     if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
@@ -422,6 +461,20 @@ const eq = (label, actual, expected) => {
       // 圖片是相對路徑：fetch 回來的文件要以目前頁面為基準轉成完整網址
       eq('にじさんじ 品名 / 数量 / 画像', result.orders[0]?.items.map((i) => [i.title, i.quantity, i.imageUrl]),
         [['【にじさんじ】マグカップ', 2, `${ORIGIN}/on/demandware.static/-/x/SSZS-1.png`]]);
+    }
+
+    // アニメイト通販（全部欄位都在列表頁；「次へ>>」翻到第 2 頁）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/mypage/history.php`);
+      console.log(`アニメイト：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('アニメイト 站台', result.site, 'animate');
+      eq('アニメイト 翻到第 2 頁，沒有讀其他頁', [result.pages, animateHits], [2, ['', '?pageno=2&order_period=1&ss=1']]);
+      eq('アニメイト 只列配送中的（お届け済不列）', result.orders.map((o) => [o.orderId, o.orderedAt, o.trackingId]),
+        [[ANIMATE_ID.AN1, isoDate(1), ANIMATE.AN1[2]], [ANIMATE_ID.AN3, isoDate(3), ANIMATE.AN3[2]]]);
+      eq('アニメイト 配送業者（onclick 裡的查詢網址）', [...new Set(result.orders.map((o) => o.carrier))], ['日本郵便']);
+      eq('アニメイト 合計（注文合計金額）', result.orders[0]?.total, 3894);
+      eq('アニメイト 品名 / 件數（含特典）', result.orders[0]?.items.map((i) => [i.title, i.quantity]),
+        [['【グッズ】アクリルスタンド', 2], ['ミニフォト', 1]]);
     }
 
     // 只用 iframe，任何情況都不該開新分頁

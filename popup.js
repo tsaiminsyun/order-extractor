@@ -9,6 +9,7 @@ const CONTENT_SCRIPTS = [
   "src/content/sites/tower.js",
   "src/content/sites/pokemoncenter.js",
   "src/content/sites/nijisanji.js",
+  "src/content/sites/animate.js",
   "src/content/main.js",
 ];
 
