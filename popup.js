@@ -8,6 +8,7 @@ const CONTENT_SCRIPTS = [
   "src/content/sites/shopify.js",
   "src/content/sites/tower.js",
   "src/content/sites/pokemoncenter.js",
+  "src/content/sites/nijisanji.js",
   "src/content/main.js",
 ];
 

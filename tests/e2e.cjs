@@ -26,7 +26,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -38,6 +38,7 @@ patch('src/content/sites/rakuten.js', "/(^|\\.)rakuten\\.co\\.jp$/.test(loc.host
 patch('src/content/sites/rakuten.js', "'https://order.my.rakuten.co.jp/purchase-history/'", `'${ORIGIN}/purchase-history/'`);
 patch('src/content/sites/tower.js', "/(^|\\.)tower\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/pokemoncenter.js', "/(^|\\.)pokemoncenter-online\\.com$/.test(loc.hostname)", 'true');
+patch('src/content/sites/nijisanji.js', "/(^|\\.)shop\\.nijisanji\\.jp$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -208,6 +209,43 @@ const pokemonDetail = `<!doctype html><html><body><!-- dwMarker="content" -->
   <p class="tText payAll"><span class="txt">支払合計</span><span class="price"><span class="lato"> 8,470 </span>円<small>税込</small></span></p>
 </div></body></html>`;
 
+/* ---------- 模擬 にじさんじ（伺服器渲染 → 詳細頁走 fetch；狀態標籤在每件商品上） ----------
+ * 結構照實際頁面（tests/fixtures/nijisanji-*）。三筆訂單：
+ *   NJ1 一天前、出荷済み → 讀詳細頁、列出
+ *   NJ2 兩天前、着荷済み → 已送達，不讀詳細頁
+ *   NJ3 三十天前、出荷済み → 超過七天，不讀詳細頁 */
+const NIJI = { NJ1: [1, '出荷済み'], NJ2: [2, '着荷済み'], NJ3: [30, '出荷済み'] };
+const NIJI_ID = { NJ1: 'SN000000000001', NJ2: 'SN000000000002', NJ3: 'SN000000000003' };
+const njDate = (daysAgo) => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return `${d.getFullYear()}年${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日 19:48`;
+};
+const nijiRow = (key) => `<li>
+  <div class="order-history-date"><span class="heading heading3">${njDate(NIJI[key][0])}</span></div>
+  <div class="order-history-status is-blue"><span class="order-history-status-label text-bold">お支払い済み</span>
+    <span class="order-history-status-id text-s text-sp-xs">ご注文番号　${NIJI_ID[key]}</span></div>
+  <div class="order-history-container"><div class="order-history-card"><div class="order-history-detail">
+    <div class="order-history-right"><ul class="label-list"><li><span class="label label-gray">${NIJI[key][1]}</span></li></ul>
+      <h3><a href="/SSZS-1.html" class="link link-l order-history-product-name">【にじさんじ】マグカップ</a></h3></div>
+  </div></div>
+  <div class="order-history-button text-right"><a href="/mypage/order-history/detail?orderID=${NIJI_ID[key]}" class="button"><span class="button-inner">詳細を見る</span></a></div></div>
+</li>`;
+const nijiList = `<!doctype html><html><body><ul class="order-history-list">${['NJ1', 'NJ2', 'NJ3'].map(nijiRow).join('')}</ul></body></html>`;
+const nijiDetail = `<!doctype html><html><body>
+<table class="table table-total"><tbody>
+  <tr><th>商品合計金額（税込）</th><td>¥5,000</td></tr>
+  <tr class="total-item"><th>お支払い合計金額（税込）</th><td>¥5,682</td></tr>
+</tbody></table>
+<div class="order-history-container order-history-summary"><div class="order-history-detail">
+  <div class="order-history-left"><a href="/SSZS-1.html" class="order-history-img"><img src="/on/demandware.static/-/x/SSZS-1.png" alt="【にじさんじ】マグカップ"></a></div>
+  <div class="order-history-right"><span class="disp-b"><a href="/SSZS-1.html" class="link link-l order-history-product-name">【にじさんじ】マグカップ</a></span></div>
+  <div class="cartitem-count is-text"><span class="cartitem-count-num">数量</span><span class="text-bold cartitem-count-text">2</span></div>
+</div>
+<div class="order-delivery-info bg-lightgray"><h4 class="heading heading4">お届け先</h4><span>山田&nbsp; 太郎</span><span>0312345678</span>
+  <h4 class="heading heading4">配送伝票番号</h4><span>366129410824</span></div></div>
+</body></html>`;
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -224,6 +262,7 @@ const shopifyEmpty = `<!doctype html><html><head>
 const hits = [];
 const trackerHits = [];  // 讀了哪幾個包裹的配送狀況頁
 const pokemonHits = [];  // 讀了哪幾筆ポケモンセンター的詳細頁
+const nijiHits = [];     // 讀了哪幾筆にじさんじ的詳細頁
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, ORIGIN);
   hits.push(u.pathname);
@@ -246,6 +285,12 @@ const server = http.createServer((req, res) => {
   }
   if (u.pathname === '/ec/Customer/Order/List') return res.end(towerList);
   if (u.pathname === '/order-history/') return res.end(pokemonList);
+  if (u.pathname === '/mypage/order-history') return res.end(nijiList);
+  if (u.pathname === '/mypage/order-history/detail') {
+    nijiHits.push(u.searchParams.get('orderID'));
+    if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
+    return res.end(u.searchParams.get('orderID') === NIJI_ID.NJ1 ? nijiDetail : '');
+  }
   if (u.pathname === '/order-details/') {
     pokemonHits.push(u.searchParams.get('orderID'));
     // fetch 不受 X-Frame-Options 影響：三種模式結果都該一樣
@@ -365,8 +410,22 @@ const eq = (label, actual, expected) => {
         [['ぬいぐるみ パモ', 2, 'https://www.pokemoncenter-online.com/a/img/item/1/S/a.jpg']]);
     }
 
+    // にじさんじ（伺服器渲染 → 詳細頁走 fetch；着荷済み的不讀）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/mypage/order-history`);
+      console.log(`にじさんじ：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('にじさんじ 站台', result.site, 'nijisanji');
+      eq('にじさんじ 只讀七天內出荷済み那筆的詳細頁', nijiHits, [NIJI_ID.NJ1]);
+      eq('にじさんじ 列出那筆', result.orders.map((o) => [o.orderId, o.orderedAt]), [[NIJI_ID.NJ1, isoDate(1)]]);
+      eq('にじさんじ 配送業者（頁面上沒有，留空）/ 伝票番号', result.orders.map((o) => [o.carrier, o.trackingId]), [['', '366129410824']]);
+      eq('にじさんじ 合計（お支払い合計金額）', result.orders[0]?.total, 5682);
+      // 圖片是相對路徑：fetch 回來的文件要以目前頁面為基準轉成完整網址
+      eq('にじさんじ 品名 / 数量 / 画像', result.orders[0]?.items.map((i) => [i.title, i.quantity, i.imageUrl]),
+        [['【にじさんじ】マグカップ', 2, `${ORIGIN}/on/demandware.static/-/x/SSZS-1.png`]]);
+    }
+
     // 只用 iframe，任何情況都不該開新分頁
-    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details/.test(u));
+    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail/.test(u));
     console.log(`另開的分頁：${extra.length} 個`);
     eq('不開新分頁', extra, []);
     eq('沒有背景程式', (await browser.targets()).some((t) => t.type() === 'service_worker'), false);

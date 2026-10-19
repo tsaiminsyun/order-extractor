@@ -8,7 +8,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
 (() => {
   'use strict';
-  const { sleep, clean, textOf, attr, all, cls, parseMoney, carrierOf, climbUnique } = globalThis.OrderScraper.util;
+  const { sleep, clean, textOf, attr, all, cls, parseMoney, carrierOf, absUrl, climbUnique } = globalThis.OrderScraper.util;
 
   const RENDER_TIMEOUT_MS = 15000; // 等待前端渲染的上限
   const PARTIAL_WAIT_MS = 2000;    // 只出現部分欄位時，再等其他欄位的時間
@@ -341,5 +341,47 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     // 登入逾時會被導到登入頁
     if (doc.querySelector('input[type="password"]')) return { signIn: true };
     return { ok: true, total: pokemonTotal(doc), shipments: pokemonShipments(doc), items: pokemonItems(doc) };
+  };
+
+  /* ---------- にじさんじ：注文詳細頁（/mypage/order-history/detail?orderID=…） ---------- */
+
+  /* 伺服器渲染，fetch 取回就讀得到，不必等。
+   *   配送伝票番号  お届け先區塊裡 <h4>配送伝票番号</h4><span>366129410824</span>
+   *                 **頁面上沒有配送業者**（沒有業者名，也沒有查詢連結），所以業者留空
+   *   商品          .order-history-detail 一件一個，「数量」旁邊是件數。
+   *                 組合商品底下另外列的內容物（.order-history-product-detail，例如特典カード）
+   *                 是那件商品的一部分、沒有数量，不另列
+   *   合計          「お支払い合計金額（税込）」（避開商品合計金額 / 配送料） */
+  function nijisanjiTrackingIds(doc) {
+    const ids = [];
+    for (const head of all(doc, 'h4').filter((h) => textOf(h) === '配送伝票番号')) {
+      for (let el = head.nextElementSibling; el && el.tagName === 'SPAN'; el = el.nextElementSibling) {
+        const no = textOf(el).replace(/-/g, '');
+        if (/^[A-Za-z0-9]{8,}$/.test(no) && !ids.includes(no)) ids.push(no);
+      }
+    }
+    return ids;
+  }
+
+  const nijisanjiItems = (doc) =>
+    all(doc, '.order-history-detail')
+      .map((row) => {
+        const img = row.querySelector('.order-history-img img');
+        const src = attr(img, 'src');
+        return {
+          title: textOf(row.querySelector('.order-history-product-name')) || clean(attr(img, 'alt')),
+          quantity: Number(textOf(row.querySelector('.cartitem-count-text'))) || 1,
+          // 圖片是站內的相對路徑
+          imageUrl: src ? absUrl(src, doc.baseURI || location.href) : null,
+        };
+      })
+      .filter((item) => item.title);
+
+  const nijisanjiTotal = (doc) =>
+    parseMoney(textOf(all(doc, 'tr').find((tr) => /^お支払い合計金額/.test(textOf(tr.querySelector('th'))))?.querySelector('td')));
+
+  globalThis.OrderScraper.readers.nijisanjiDetail = async (doc) => {
+    if (doc.querySelector('input[type="password"]')) return { signIn: true };
+    return { ok: true, total: nijisanjiTotal(doc), trackingIds: nijisanjiTrackingIds(doc), items: nijisanjiItems(doc) };
   };
 })();

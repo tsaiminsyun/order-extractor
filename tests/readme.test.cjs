@@ -62,6 +62,10 @@ module.exports = async function run() {
       ['送り状番号', 'src/content/readers.js'],
       ['支払合計', 'src/content/readers.js'],
       ['select[aria-label="個数"]', 'src/content/readers.js'],
+      ['.order-history-list', 'src/content/sites/nijisanji.js'],
+      ['着荷済', 'src/content/sites/nijisanji.js'],
+      ['配送伝票番号', 'src/content/readers.js'],
+      ['.cartitem-count-text', 'src/content/readers.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);
@@ -102,10 +106,11 @@ module.exports = async function run() {
   /* 7. fixture 不可含個資（倉庫是公開的）。
    *    用「形狀」判斷而不是列出實際字串 —— 黑名單本身就會把要保護的資料寫進公開倉庫。
    *    置換後的假住址統一是 東京都 / 〒100-0001，所以只要出現別的都道府県或郵遞區號，
-   *    就表示有未經置換的實際住址混進來（新 fixture 幾乎一定會帶這兩樣）。 */
+   *    就表示有未經置換的實際住址混進來（新 fixture 幾乎一定會帶這兩樣）。
+   *    郵遞區號也有不帶連字號的寫法（にじさんじ：〒2420025），兩種都要認，比對前去掉連字號 */
   {
     const PREFECTURE = /北海道|青森県|岩手県|宮城県|秋田県|山形県|福島県|茨城県|栃木県|群馬県|埼玉県|千葉県|東京都|神奈川県|新潟県|富山県|石川県|福井県|山梨県|長野県|岐阜県|静岡県|愛知県|三重県|滋賀県|京都府|大阪府|兵庫県|奈良県|和歌山県|鳥取県|島根県|岡山県|広島県|山口県|徳島県|香川県|愛媛県|高知県|福岡県|佐賀県|長崎県|熊本県|大分県|宮崎県|鹿児島県|沖縄県/g;
-    const POSTAL = /〒\s*\d{3}-\d{4}/g;
+    const POSTAL = /〒\s*\d{3}-?\d{4}/g;
     const PLACEHOLDER = { prefecture: '東京都', postal: '〒100-0001' };
 
     const stray = { prefecture: [], postal: [] };
@@ -115,7 +120,7 @@ module.exports = async function run() {
         if (m !== PLACEHOLDER.prefecture) stray.prefecture.push(`${f}: ${m}`);
       }
       for (const m of (body.match(POSTAL) || [])) {
-        if (m.replace(/\s/g, '') !== PLACEHOLDER.postal) stray.postal.push(`${f}: ${m}`);
+        if (m.replace(/[\s-]/g, '') !== PLACEHOLDER.postal.replace(/-/g, '')) stray.postal.push(`${f}: ${m}`);
       }
     }
     c.eq('fixture 沒有未置換的都道府県', [...new Set(stray.prefecture)], []);
