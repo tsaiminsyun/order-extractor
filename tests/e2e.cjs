@@ -12,6 +12,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const puppeteer = require('puppeteer');
+const { shiftJis } = require('./sjis.cjs');
 
 const PORT = Number(process.env.PORT || 8765);
 const ORIGIN = `http://localhost:${PORT}`;
@@ -26,7 +27,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -40,6 +41,7 @@ patch('src/content/sites/tower.js', "/(^|\\.)tower\\.jp$/.test(loc.hostname)", '
 patch('src/content/sites/pokemoncenter.js', "/(^|\\.)pokemoncenter-online\\.com$/.test(loc.hostname)", 'true');
 patch('src/content/sites/nijisanji.js', "/(^|\\.)shop\\.nijisanji\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/animate.js', "/(^|\\.)animate-onlineshop\\.jp$/.test(loc.hostname)", 'true');
+patch('src/content/sites/mumo.js', "/(^|\\.)mu-mo\\.net$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -281,6 +283,26 @@ const animatePager = '<div class="my-pager"><ul><li class="current"><a href="#">
 const animateList = (n) => `<!doctype html><html><body><section>${n === 1 ? animateOrder('AN1') + animateOrder('AN2') + animatePager : animateOrder('AN3')}</section></body></html>`;
 const animateHits = [];  // 讀了アニメイト的哪幾頁
 
+/* ---------- 模擬 mu-mo ショップ（詳細頁要送 POST 表單打開，回應是 Shift_JIS） ----------
+ * 結構照實際頁面（tests/fixtures/mumo-*）。jumpdetail 表單照頁面的 detail() 原始碼造。
+ *   MU1 一天前、出荷済み → 送表單讀詳細頁、列出
+ *   MU2 兩天前、配達完了 → 不讀
+ *   MU3 三十天前、出荷済み → 超過七天，不讀 */
+const MUMO = { MU1: [1, '出荷済み'], MU2: [2, '配達完了'], MU3: [30, '出荷済み'] };
+const MUMO_ID = { MU1: ['36000001', 'tokA1--'], MU2: ['36000002', 'tokA2--'], MU3: ['36000003', 'tokA3--'] };
+const MUMO_TEL = 'telZ9--';
+const mumoBlock = (key) => `<tr><th colspan="5" class="cellHead"><p class="tit"><strong>▼P</strong> ${isoDate(MUMO[key][0]).replace(/-/g, '/')}ご注文（<a href="#.#" onclick="javascript: detail('${MUMO_ID[key][1]}','${MUMO_TEL}');">履歴詳細</a>）</p></th></tr>
+<tr><th>注文番号</th><th>商品</th><th>配送先</th><th>配送状況</th><th>レビューを書く</th></tr>
+<tr><td rowspan="1">${MUMO_ID[key][0]}</td><td class="cellItem">アクリルスタンド他1商品</td><td>山田太郎</td><td>${MUMO[key][1]}</td><td class="cellBtn"><em>&nbsp;</em></td></tr>`;
+const mumoList = `<!doctype html><html><body><table class="tableCart tablePager"><tbody>${['MU1', 'MU2', 'MU3'].map(mumoBlock).join('')}</tbody></table>
+<form name="jumpdetail" method="post" action=""><input type="hidden" name="order_id" value=""><input type="hidden" name="order_tel" value=""><input type="hidden" name="jsiteid" value="mumo"></form></body></html>`;
+const mumoDetail = `<!doctype html><html><head><meta charset="Shift_JIS"></head><body><table class="tableCart"><tbody>
+<tr><th colspan="8" class="cellHead"><p class="tit">▼配送セットA</p></th></tr>
+<tr><td class="cellItem">TVXV-4763<br />アクリルスタンド (A)</td><td class="cellDeliv" rowspan="2">出荷済み<br />配送会社：ヤマト運輸<br />408273350844</td><td></td><td class="cellPrice">\\1,870</td><td>3</td><td class="cellPrice">\\5,610</td></tr>
+<tr><td class="cellItem">TVXV-4764<br />アクリルスタンド (B)</td><td></td><td class="cellPrice">\\1,870</td><td>1</td><td class="cellPrice">\\1,870</td></tr>
+</tbody></table><p class="txtTotal"><strong>お支払い合計&nbsp;&nbsp;\\8,280</strong></p></body></html>`;
+const mumoHits = [];  // 送了哪些詳細頁的請求
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -321,6 +343,18 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/ec/Customer/Order/List') return res.end(towerList);
   if (u.pathname === '/order-history/') return res.end(pokemonList);
   if (u.pathname === '/mypage/order-history') return res.end(nijiList);
+  if (u.pathname === '/avx/sv/mypordhist05') return res.end(mumoList);
+  if (u.pathname === '/avx/sv/mypordhist03usr') {
+    // 詳細頁只接受 detail() 送的那張表單；回應用 Shift_JIS（舊式日本網站常見），驗證不會變亂碼
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      mumoHits.push([req.method, u.searchParams.get('ordid'), body]);
+      res.setHeader('Content-Type', 'text/html; charset=Shift_JIS');
+      res.end(Buffer.from(shiftJis(mumoDetail)));
+    });
+    return undefined;
+  }
   if (u.pathname === '/mypage/history.php') {
     animateHits.push(u.search);
     return res.end(animateList(Number(u.searchParams.get('pageno') || 1)));
@@ -477,8 +511,20 @@ const eq = (label, actual, expected) => {
         [['【グッズ】アクリルスタンド', 2], ['ミニフォト', 1]]);
     }
 
+    // mu-mo ショップ（送 POST 表單讀詳細頁，回應是 Shift_JIS）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/avx/sv/mypordhist05`);
+      console.log(`mu-mo：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('mu-mo 站台', result.site, 'mumo');
+      eq('mu-mo 只對七天內、沒送達的那筆送出表單（POST、欄位照 detail()）', mumoHits,
+        [['POST', MUMO_ID.MU1[1], `order_id=${MUMO_ID.MU1[1]}&order_tel=${MUMO_TEL}&jsiteid=mumo`]]);
+      eq('mu-mo 列出那筆（Shift_JIS 解碼正確）', result.orders.map((o) => [o.orderId, o.orderedAt, o.carrier, o.trackingId, o.total]),
+        [[MUMO_ID.MU1[0], isoDate(1), 'ヤマト運輸', '408273350844', 8280]]);
+      eq('mu-mo 品名 / 個数', result.orders[0]?.items.map((i) => [i.title, i.quantity]), [['アクリルスタンド (A)', 3], ['アクリルスタンド (B)', 1]]);
+    }
+
     // 只用 iframe，任何情況都不該開新分頁
-    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail/.test(u));
+    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03/.test(u));
     console.log(`另開的分頁：${extra.length} 個`);
     eq('不開新分頁', extra, []);
     eq('沒有背景程式', (await browser.targets()).some((t) => t.type() === 'service_worker'), false);

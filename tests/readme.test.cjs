@@ -70,6 +70,10 @@ module.exports = async function run() {
       ['.order_slip_number a', 'src/content/sites/animate.js'],
       ['.order_item_privilege_name', 'src/content/sites/animate.js'],
       ['.my-pager .next a', 'src/content/sites/animate.js'],
+      ['jumpdetail', 'src/content/sites/mumo.js'],
+      ['mypordhist03usr', 'src/content/sites/mumo.js'],
+      ['td.cellDeliv', 'src/content/readers.js'],
+      ['.txtTotal', 'src/content/readers.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);
@@ -129,6 +133,12 @@ module.exports = async function run() {
     }
     c.eq('fixture 沒有未置換的都道府県', [...new Set(stray.prefecture)], []);
     c.eq('fixture 沒有未置換的郵遞區號', [...new Set(stray.postal)], []);
+
+    // email 一律換成 example.com 的（mu-mo 的注文詳細頁上有）
+    const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+    const emails = fs.readdirSync(path.join(ROOT, 'tests/fixtures')).flatMap((f) =>
+      (read(path.join('tests/fixtures', f)).match(EMAIL) || []).filter((m) => !m.endsWith('@example.com')).map((m) => `${f}: ${m}`));
+    c.eq('fixture 沒有未置換的 email', [...new Set(emails)], []);
     c.eq('tmp/（未置換的原始頁面）有被 gitignore', read('.gitignore').includes('tmp/'), true);
   }
 

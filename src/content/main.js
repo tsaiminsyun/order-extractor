@@ -36,18 +36,19 @@
   // 另外載入的頁面分兩種讀法，由站台指定 via：
   //   'frame'（預設）前端渲染的頁面，要讓瀏覽器真的跑完 JS，用隱藏 iframe
   //   'fetch'         伺服器就渲染好的頁面（例如 Shopify 的訂單頁），抓回來解析即可，快得多
+  //                   post 有給時用 POST 送出（詳細頁是用表單打開的站台，例如 mu-mo）
   // read 一律在頁面還活著的時候跑完 —— iframe 讀完就會被移除，不能把 document 帶出來
-  async function withPage(url, via, read) {
+  async function withPage(url, via, read, post) {
     if (via === 'fetch') {
-      const { doc } = await fetchDoc(url);
+      const { doc } = await fetchDoc(url, post);
       return read(doc);
     }
     return readInFrame(url, read);
   }
 
-  async function readPage(url, reader, via) {
+  async function readPage({ url, reader, via, post }) {
     try {
-      const info = await withPage(url, via, (doc) => readers[reader](doc));
+      const info = await withPage(url, via, (doc) => readers[reader](doc), post);
       // iframe 被擋下時就放棄這一頁，相關欄位留空，不另開分頁
       return info || { ok: false, error: '頁面無法在 iframe 內載入' };
     } catch (err) {
@@ -55,19 +56,20 @@
     }
   }
 
-  // 同一個網址只讀一次，所有網址同時讀取
+  // 同一個請求（網址＋POST 內容）只讀一次，所有請求同時讀取
   async function runLookups(orders) {
-    const byUrl = new Map();
-    for (const { url, reader, via, apply } of orders.flatMap((o) => o.lookups)) {
-      if (!byUrl.has(url)) byUrl.set(url, { reader, via, waiting: [] });
-      byUrl.get(url).waiting.push(apply);
+    const byKey = new Map();
+    for (const { apply, ...page } of orders.flatMap((o) => o.lookups)) {
+      const key = `${page.url}\n${page.post ?? ''}`;
+      if (!byKey.has(key)) byKey.set(key, { page, waiting: [] });
+      byKey.get(key).waiting.push(apply);
     }
 
-    const total = byUrl.size;
+    const total = byKey.size;
     let done = 0;
     progress({ phase: 'lookup', done, total });
-    await Promise.all([...byUrl].map(async ([url, { reader, via, waiting }]) => {
-      const info = await readPage(url, reader, via);
+    await Promise.all([...byKey.values()].map(async ({ page, waiting }) => {
+      const info = await readPage(page);
       progress({ phase: 'lookup', done: ++done, total });
       // 讀失敗或需要重新登入的頁面，相關欄位留空
       if (info.ok) for (const apply of waiting) apply(info);

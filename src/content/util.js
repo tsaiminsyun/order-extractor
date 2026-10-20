@@ -147,10 +147,28 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
   /* ---------- 另外載入頁面 ---------- */
 
-  async function fetchDoc(url) {
-    const res = await fetch(url, { credentials: 'include', headers: { Accept: 'text/html' } });
+  /* 回應的編碼：Content-Type 的 charset → HTML 開頭的 <meta charset> → UTF-8。
+   * res.text() 一律當 UTF-8 解，Shift_JIS / EUC-JP 的舊站會變成亂碼，標籤就比對不到 */
+  async function decodeHtml(res) {
+    const buf = await res.arrayBuffer();
+    const head = new TextDecoder('windows-1252').decode(buf.slice(0, 2048));
+    const charset = /charset=["']?([\w-]+)/i.exec(res.headers.get('content-type') || '')?.[1]
+      || /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1]
+      || 'utf-8';
+    try { return new TextDecoder(charset).decode(buf); } catch { return new TextDecoder().decode(buf); }
+  }
+
+  // post 有給時用 POST 送出（application/x-www-form-urlencoded，跟網頁表單一樣）
+  async function fetchDoc(url, post) {
+    const init = { credentials: 'include', headers: { Accept: 'text/html' } };
+    if (post != null) {
+      init.method = 'POST';
+      init.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      init.body = post;
+    }
+    const res = await fetch(url, init);
     if (!res.ok) throw new Error(`HTTP ${res.status} — ${url}`);
-    return { doc: new DOMParser().parseFromString(await res.text(), 'text/html'), url: res.url || url };
+    return { doc: new DOMParser().parseFromString(await decodeHtml(res), 'text/html'), url: res.url || url };
   }
 
   // 等 iframe 載入到同網域的文件。只要 HTML 解析完就回傳，不必等圖片等資源（load 事件）。

@@ -384,4 +384,50 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     if (doc.querySelector('input[type="password"]')) return { signIn: true };
     return { ok: true, total: nijisanjiTotal(doc), trackingIds: nijisanjiTrackingIds(doc), items: nijisanjiItems(doc) };
   };
+
+  /* ---------- mu-mo ショップ：購入履歴・配送状況詳細 ---------- */
+
+  /* 商品表（table.tableCart）一列一件商品。配送狀況那一格（td.cellDeliv）用 rowspan 跨過
+   * 同一個包裹的所有商品，所以照列的順序走：遇到 cellDeliv 就是新的包裹，之後的商品都歸它。
+   * 這個站台**知道哪件商品在哪個包裹**，不必把全部商品掛到每個包裹上。
+   *   配送狀況格  「出荷待ち」/「配達完了<br>配送会社：ヤマト運輸<br>408273350844」
+   *   商品格      「TVXV-4763<br>アクリルスタンド …」（商品代碼、品名）
+   *   個数        單價（第一個 td.cellPrice）右邊那一格
+   *   合計        「お支払い合計 ¥45,680」 */
+  const MUMO_DELIVERED_RE = /配達完了/;
+  const MUMO_CARRIER_RE = /^配送会社\s*[:：]\s*(.+)$/;
+
+  function mumoItem(row, cell) {
+    const lines = linesOf(cell);
+    return {
+      title: lines.slice(1).join(' ') || lines[0] || '',
+      quantity: Number(textOf(row.querySelector('td.cellPrice')?.nextElementSibling)) || 1,
+      imageUrl: null, // 頁面上沒有商品圖
+    };
+  }
+
+  function mumoParcels(doc) {
+    const groups = [];
+    for (const row of all(doc, 'table.tableCart tr')) {
+      const deliv = row.querySelector('td.cellDeliv');
+      if (deliv) groups.push({ lines: linesOf(deliv), items: [] });
+      const item = row.querySelector('td.cellItem');
+      if (item && groups.length) groups.at(-1).items.push(mumoItem(row, item));
+    }
+    // 已送達的包裹不擷取；沒有伝票番号的（出荷待ち）本來就不會有號碼
+    return groups
+      .filter((g) => !MUMO_DELIVERED_RE.test(g.lines[0] || ''))
+      .flatMap((g) => {
+        const carrier = g.lines.map((l) => MUMO_CARRIER_RE.exec(l)?.[1]).find(Boolean) || '';
+        return g.lines
+          .map((l) => l.replace(/-/g, ''))
+          .filter((l) => /^[A-Za-z0-9]{8,}$/.test(l))
+          .map((trackingId) => ({ carrier, trackingId, items: g.items.filter((i) => i.title) }));
+      });
+  }
+
+  globalThis.OrderScraper.readers.mumoDetail = async (doc) => {
+    if (doc.querySelector('input[type="password"]')) return { signIn: true };
+    return { ok: true, total: parseMoney(textOf(doc.querySelector('.txtTotal'))), parcels: mumoParcels(doc) };
+  };
 })();

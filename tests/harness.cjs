@@ -4,7 +4,7 @@ const path = require('path');
 const { JSDOM } = require('jsdom');
 
 const SRC = path.join(__dirname, '..', 'src', 'content');
-const FILES = ['util.js', 'readers.js', 'sites/amazon.js', 'sites/rakuten.js', 'sites/shopify.js', 'sites/tower.js', 'sites/pokemoncenter.js', 'sites/nijisanji.js', 'sites/animate.js', 'main.js'];
+const FILES = ['util.js', 'readers.js', 'sites/amazon.js', 'sites/rakuten.js', 'sites/shopify.js', 'sites/tower.js', 'sites/pokemoncenter.js', 'sites/nijisanji.js', 'sites/animate.js', 'sites/mumo.js', 'main.js'];
 
 function loadFiles(files) {
   delete globalThis.OrderScraper; // 重新載入時不要累積重複的站台
@@ -52,13 +52,20 @@ function setup(html, url, { pages } = {}) {
   patchIframes(dom.window, pages, asked);
   // 有些站台的頁面是伺服器渲染的，用 fetch 取回就夠（Shopify 的訂單頁、商品 JSON）。
   // 一樣由 pages(url) 供應內容，沒給 pages 時維持「不該發出 fetch」的防呆
-  globalThis.fetch = async (u) => {
+  // POST 的話 asked 也記下 method 與 body，pages 的第二個參數收得到 { method, body }
+  globalThis.fetch = async (u, init = {}) => {
     const url = String(u);
     if (!pages) throw new Error('不應發出 fetch：' + url);
-    asked.push({ url });
-    const body = pages(url);
+    asked.push(init.method ? { url, method: init.method, body: String(init.body) } : { url });
+    const body = pages(url, init);
     const miss = { ok: false, status: 404, url, text: async () => '', json: async () => ({}) };
-    return body == null ? miss : { ok: true, status: 200, url, text: async () => body, json: async () => JSON.parse(body) };
+    return body == null ? miss : {
+      ok: true, status: 200, url,
+      headers: { get: (name) => (/^content-type$/i.test(name) ? 'text/html; charset=utf-8' : null) },
+      text: async () => body,
+      json: async () => JSON.parse(body),
+      arrayBuffer: async () => new TextEncoder().encode(body).buffer,
+    };
   };
   globalThis.chrome = {
     runtime: {
