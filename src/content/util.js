@@ -28,6 +28,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
    *   2026/10/08、2026/09/18(金)、2026/09/29 (Tuesday)   タワーレコード / 楽天
    *   2026年8月21日                                      Amazon 日本語 / 简体中文
    *   2026年09月 10日（木）                               ポケモンセンター（月和日中間有空格）
+   *   2026.10.17 21:06:59                                ZOZOTOWN
    *   August 21, 2026                                    Amazon English */
   const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
     'july', 'august', 'september', 'october', 'november', 'december'];
@@ -41,7 +42,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     if (!str) return null;
     const iso = str.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
     if (iso) return ymd(iso[1], iso[2], iso[3]);
-    const slash = str.match(/(\d{4})\s*[/年]\s*(\d{1,2})\s*[/月]\s*(\d{1,2})/);
+    const slash = str.match(/(\d{4})\s*[/年.]\s*(\d{1,2})\s*[/月.]\s*(\d{1,2})/);
     if (slash) return ymd(slash[1], slash[2], slash[3]);
     const named = str.match(/([A-Za-z]{3,})\s+(\d{1,2}),?\s*(\d{4})/);
     if (named) {

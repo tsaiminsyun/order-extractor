@@ -27,7 +27,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`, `${ORIGIN}/_member/*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -42,6 +42,7 @@ patch('src/content/sites/pokemoncenter.js', "/(^|\\.)pokemoncenter-online\\.com$
 patch('src/content/sites/nijisanji.js', "/(^|\\.)shop\\.nijisanji\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/animate.js', "/(^|\\.)animate-onlineshop\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/mumo.js', "/(^|\\.)mu-mo\\.net$/.test(loc.hostname)", 'true');
+patch('src/content/sites/zozo.js', "/(^|\\.)zozo\\.jp$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -303,6 +304,33 @@ const mumoDetail = `<!doctype html><html><head><meta charset="Shift_JIS"></head>
 </tbody></table><p class="txtTotal"><strong>お支払い合計&nbsp;&nbsp;\\8,280</strong></p></body></html>`;
 const mumoHits = [];  // 送了哪些詳細頁的請求
 
+/* ---------- 模擬 ZOZOTOWN（一個區塊是一個包裹；伝票番号在詳細頁，fetch） ----------
+ * 結構照實際頁面（tests/fixtures/zozo-*）。
+ *   ZP1 配達中：ZO1（一天前）→ 讀詳細頁、列出
+ *   ZP2 配達完了、まとめて発送：ZO2、ZO3（兩天前）→ 不讀
+ *   ZP3 配達中：ZO4（三十天前）→ 超過七天，不讀 */
+const ZOZO_ID = { ZO1: '421000001', ZO2: '421000002', ZO3: '421000003', ZO4: '421000004' };
+const zoDate = (daysAgo) => isoDate(daysAgo).replace(/-/g, '.');
+const zozoRow = (key, daysAgo, item) => `<tr class="thumbBox"><td class="goodsBox"><div class="thumb"><p class="img"><img src="https://c.imgz.jp/1/${key}.jpg"></p></div>
+  <div class="thumbDetail"><p class="brandName">hellam</p><p class="itemName"><a href="#">${item}</a></p><div class="colorName">ブルー / FREE</div>
+  <p class="price"><span class="priceNum">¥8,910</span><span class="tax">税込 / 数量：2</span></p></div></td>
+  <td rowspan="2" class="orderTime"><p><span class="orderItemTh">注文日</span>：${zoDate(daysAgo)}</p><p><span class="orderItemTh">注文番号</span>：${ZOZO_ID[key]}</p>
+  <p class="btn"><a href="./detail.html?oid=${ZOZO_ID[key]}&amp;isold=0">注文詳細・各種手続き</a></p></td></tr>`;
+const zozoPack = (status, rows) => `<div class="orderList"><div class="orderDetailHeader"><p class="orderDetailHeader-h">${status}</p></div>
+  <div class="orderDetailBody"><table class="orderDetail resist"><tbody>${rows}</tbody></table></div></div>`;
+const zozoList = `<!doctype html><html><body><div class="listBlock clearfix">
+${zozoPack('配達中', zozoRow('ZO1', 1, 'デニムジャケット'))}
+${zozoPack('配達完了', zozoRow('ZO2', 2, 'トート') + zozoRow('ZO3', 2, 'デニムパンツ'))}
+${zozoPack('配達中', zozoRow('ZO4', 30, 'シャツ'))}
+</div></body></html>`;
+const zozoDetail = `<!doctype html><html><body><table class="resist"><tbody>
+  <tr><th>注文番号</th><td>${ZOZO_ID.ZO1}</td></tr>
+  <tr><th>伝票番号</th><td>293252106335<a href="#" data-toggle="modalbox">詳細</a></td></tr>
+</tbody></table><div class="bottomTbl"><table class="resist"><tbody>
+  <tr><th>商品合計</th><td>¥17,820</td></tr><tr><th>支払い金額</th><td><span class="ttlPrice">¥18,150</span></td></tr>
+</tbody></table></div></body></html>`;
+const zozoHits = [];
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -344,6 +372,11 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/order-history/') return res.end(pokemonList);
   if (u.pathname === '/mypage/order-history') return res.end(nijiList);
   if (u.pathname === '/avx/sv/mypordhist05') return res.end(mumoList);
+  if (u.pathname === '/_member/orderhistory/default.html') return res.end(zozoList);
+  if (u.pathname === '/_member/orderhistory/detail.html') {
+    zozoHits.push(u.searchParams.get('oid'));
+    return res.end(u.searchParams.get('oid') === ZOZO_ID.ZO1 ? zozoDetail : '');
+  }
   if (u.pathname === '/avx/sv/mypordhist03usr') {
     // 詳細頁只接受 detail() 送的那張表單；回應用 Shift_JIS（舊式日本網站常見），驗證不會變亂碼
     let body = '';
@@ -523,8 +556,20 @@ const eq = (label, actual, expected) => {
       eq('mu-mo 品名 / 個数', result.orders[0]?.items.map((i) => [i.title, i.quantity]), [['アクリルスタンド (A)', 3], ['アクリルスタンド (B)', 1]]);
     }
 
+    // ZOZOTOWN（一個區塊是一個包裹；只讀七天內、沒送達的訂單的詳細頁）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/_member/orderhistory/default.html`);
+      console.log(`ZOZOTOWN：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('ZOZO 站台', result.site, 'zozo');
+      eq('ZOZO 只讀七天內、沒送達的那筆詳細頁', zozoHits, [ZOZO_ID.ZO1]);
+      eq('ZOZO 列出那筆', result.orders.map((o) => [o.orderId, o.orderedAt, o.carrier, o.trackingId, o.total]),
+        [[ZOZO_ID.ZO1, isoDate(1), '', '293252106335', 18150]]);
+      eq('ZOZO 品名 / 数量 / 画像', result.orders[0]?.items.map((i) => [i.title, i.quantity, i.imageUrl]),
+        [['hellam デニムジャケット（ブルー / FREE）', 2, 'https://c.imgz.jp/1/ZO1.jpg']]);
+    }
+
     // 只用 iframe，任何情況都不該開新分頁
-    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03/.test(u));
+    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03|orderhistory\/detail/.test(u));
     console.log(`另開的分頁：${extra.length} 個`);
     eq('不開新分頁', extra, []);
     eq('沒有背景程式', (await browser.targets()).some((t) => t.type() === 'service_worker'), false);

@@ -430,4 +430,25 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     if (doc.querySelector('input[type="password"]')) return { signIn: true };
     return { ok: true, total: parseMoney(textOf(doc.querySelector('.txtTotal'))), parcels: mumoParcels(doc) };
   };
+
+  /* ---------- ZOZOTOWN：注文内容の詳細（detail.html?oid=…） ---------- */
+
+  /* 伺服器渲染，fetch 取回就讀得到。商品與包裹的對應在列表頁就知道了，這裡只要：
+   *   伝票番号  <th>伝票番号</th><td>293252106335<a>詳細</a></td>（「詳細」只是打開配送歷程，要拿掉）
+   *   合計      <th>支払い金額</th><td>¥9,240</td>（避開商品合計 / 送料 / ZOZOポイント） */
+  const zozoValue = (doc, label) => all(doc, 'th').find((th) => textOf(th) === label)?.nextElementSibling;
+
+  function zozoTrackingIds(doc) {
+    const cell = zozoValue(doc, '伝票番号');
+    if (!cell) return [];
+    const copy = cell.cloneNode(true);
+    copy.querySelectorAll('a').forEach((a) => a.remove());
+    const ids = linesOf(copy).flatMap((line) => line.split(/\s+/)).map((t) => t.replace(/-/g, ''));
+    return [...new Set(ids.filter((t) => /^[A-Za-z0-9]{8,}$/.test(t)))];
+  }
+
+  globalThis.OrderScraper.readers.zozoDetail = async (doc) => {
+    if (doc.querySelector('input[type="password"]')) return { signIn: true };
+    return { ok: true, total: parseMoney(textOf(zozoValue(doc, '支払い金額'))), trackingIds: zozoTrackingIds(doc) };
+  };
 })();

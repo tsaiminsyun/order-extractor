@@ -1,0 +1,384 @@
+<div class="sectionInner">
+  <div class="sectionHeader clearfix">
+    <h3>注文内容の詳細</h3>
+
+    <p class="txt">注文内容をご確認ください。</p>
+
+    <div id="receiptShow">
+      <p id="receipt" data-downloaded-text="納品書兼領収書ダウンロード済み">
+        <a href="#" class="download-link" id="receiptlinkNoDialog"
+          >納品書兼領収書をダウンロード</a
+        >
+      </p>
+
+      <form method="post" action="detail.html" id="printPDF">
+        <input
+          type="hidden"
+          name="seckey"
+          value="fph8rb1nomnmq1wd78yiwe0us6grnc7x"
+        />
+
+        <input type="hidden" name="oid" value="421113907" />
+        <input type="hidden" name="c" value="PrintReceipt" />
+
+        <input type="hidden" name="isold" value="0" />
+      </form>
+    </div>
+
+    <!-- /.sectionHeader -->
+  </div>
+
+  <div class="contBody">
+    <table class="resist">
+      <tbody>
+        <tr>
+          <th>配送状況</th>
+          <td>
+            <div class="delivery-status">
+              <!-- 予約商品の入荷遅延文言 -->
+
+              <div class="text-note spacing-t-sm"></div>
+
+              <div class="delivery-info">
+                <div
+                  class="delivery-info__status"
+                  data-step="4"
+                  data-max-step="5"
+                >
+                  <div class="c-phase-indicator">
+                    <div
+                      class="c-phase-indicator-item"
+                      data-phase-item-status="done"
+                    >
+                      <div class="c-phase-indicator-item__icon">
+                        <span
+                          class="c-icon--checkmark"
+                          aria-hidden="true"
+                        ></span>
+                      </div>
+                      <div class="c-phase-indicator-item__label">
+                        発送準備中
+                      </div>
+                    </div>
+
+                    <div
+                      class="c-phase-indicator-item"
+                      data-phase-item-status="done"
+                    >
+                      <div class="c-phase-indicator-item__icon">
+                        <span
+                          class="c-icon--checkmark"
+                          aria-hidden="true"
+                        ></span>
+                      </div>
+                      <div class="c-phase-indicator-item__label">
+                        発送処理中
+                      </div>
+                    </div>
+
+                    <div
+                      class="c-phase-indicator-item"
+                      data-phase-item-status="done"
+                    >
+                      <div class="c-phase-indicator-item__icon">
+                        <span
+                          class="c-icon--checkmark"
+                          aria-hidden="true"
+                        ></span>
+                      </div>
+                      <div class="c-phase-indicator-item__label">発送済み</div>
+                    </div>
+
+                    <div
+                      class="c-phase-indicator-item"
+                      data-phase-item-status="current"
+                    >
+                      <div class="c-phase-indicator-item__icon">
+                        <span
+                          class="c-icon--checkmark"
+                          aria-hidden="true"
+                        ></span>
+                      </div>
+                      <div class="c-phase-indicator-item__label">配達中</div>
+
+                      <a
+                        class="delivery-process__link"
+                        href="#"
+                        data-toggle="modalbox"
+                        data-target="#modalbox-tracking-events-421113907"
+                        data-additional-class="modalboard-tracking-events"
+                      >
+                        追跡する
+                      </a>
+                    </div>
+
+                    <div
+                      class="c-phase-indicator-item"
+                      data-phase-item-status=""
+                    >
+                      <div class="c-phase-indicator-item__icon">
+                        <span
+                          class="c-icon--checkmark"
+                          aria-hidden="true"
+                        ></span>
+                      </div>
+                      <div class="c-phase-indicator-item__label">配達完了</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  class="modal-source"
+                  id="modalbox-tracking-events-421113907"
+                  data-width="xs"
+                >
+                  <h2 class="modal-tracking-events__heading">配送状況の詳細</h2>
+                  <div class="tracking-events">
+                    <div class="tracking-daily">
+                      <h2 class="tracking-daily__heading">10月20日（火）</h2>
+                      <div class="tracking-daily__timeline">
+                        <div class="tracking-timely">
+                          <div class="tracking-timely__time">
+                            <span class="tracking-timely__label"> 09:29 </span>
+                          </div>
+                          <div class="tracking-timely__content">
+                            <div class="tracking-timely__heading">配達中</div>
+                            <div class="tracking-timely__description">
+                              お届け先に向かっています。
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="tracking-daily">
+                      <h2 class="tracking-daily__heading">10月19日（月）</h2>
+                      <div class="tracking-daily__timeline">
+                        <div class="tracking-timely">
+                          <div class="tracking-timely__time">
+                            <span class="tracking-timely__label"> 08:46 </span>
+                          </div>
+                          <div class="tracking-timely__content">
+                            <div class="tracking-timely__heading">発送済み</div>
+                            <div class="tracking-timely__description">
+                              配達店へ向けて発送されました。
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="nav-action spacing-t-xl">
+                      <button
+                        class="g-btn btn-primary-o size-lg w-lg"
+                        type="button"
+                        data-dismiss="modalbox"
+                      >
+                        閉じる
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <ul class="text-note">
+                <li>
+                  ※各配送業者のサイト等で変更された日時・場所はZOZOTOWNの注文詳細には反映されません。
+                </li>
+              </ul>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="top">
+      <table class="resist">
+        <tbody>
+          <tr>
+            <th>注文日</th>
+            <td>2026.10.17 21:06:59</td>
+          </tr>
+          <tr>
+            <th>注文番号</th>
+            <td>421113907</td>
+          </tr>
+
+          <tr>
+            <th>発送元</th>
+            <td>株式会社ZOZO</td>
+          </tr>
+
+          <tr>
+            <th>配達指定日時</th>
+            <td>日時指定なし</td>
+          </tr>
+
+          <tr>
+            <th>伝票番号</th>
+            <td>
+              293252106335<a
+                href="#"
+                class="p-member-orderhistory-detail-tracking-modal-link"
+                data-toggle="modalbox"
+                data-target="#modalbox-tracking-events-421113907"
+                data-additional-class="modalboard-tracking-events"
+                >詳細</a
+              >
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="top">
+      <table>
+        <tbody>
+          <tr>
+            <th>支払い方法</th>
+            <td>
+              <div class="p-member-orderhistory-detail-payment-method">
+                <div class="p-member-orderhistory-detail-payment-method__label">
+                  クレジット（一括）
+                </div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table>
+        <tbody>
+          <tr>
+            <th>お届け先</th>
+
+            <td>
+              <p>山田太郎</p>
+              <p>〒100-0001 東京都 千代田区1-1-1</p>
+              <p>03-1234-5678</p>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table>
+        <tbody>
+          <tr>
+            <th>受取り方法</th>
+            <td>対面で受取り</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <table class="resist">
+      <tbody>
+        <tr class="thumbBox detail">
+          <th rowspan="1">商品情報</th>
+
+          <!-- アイテム数 -->
+          <td class="clearix">
+            <div class="thumb">
+              <p class="img">
+                <img
+                  width="110"
+                  height="132"
+                  alt=""
+                  src="https://c.imgz.jp/491/110312491/110312491b_33_d_125.jpg"
+                />
+              </p>
+              <p class="bigimage">
+                <a
+                  href="https://zozo.jp/shop/lian/image.html?gid=109312491&amp;did=174425717"
+                  target="_brank"
+                  class="winL opWin"
+                >
+                  <img
+                    src="/_member/images/expansion.png"
+                    width="30"
+                    height="30"
+                    alt="拡大"
+                  />
+                </a>
+              </p>
+              <!-- IsOldGoods -->
+              <!-- ZoZo_Nothing -->
+              <!-- /.thumb -->
+            </div>
+            <div class="thumbDetail">
+              <p class="brandName">hellam</p>
+
+              <p class="itemName">
+                <a href="../../?c=gr&amp;did=174425717"
+                  >コーデュロイカラーストライプデニムジャケット</a
+                >
+              </p>
+
+              <p class="colorName">インディゴブルー / FREE</p>
+
+              <p class="price">
+                <span class="priceNum">¥8,910</span
+                ><span class="tax">税込 / 数量：1</span><br />
+              </p>
+
+              <!-- /.thumbDetail -->
+            </div>
+          </td>
+          <!-- /#thumbBox -->
+        </tr>
+        <!--OHD_GoodsList_ReserveID-->
+        <!--OHD_GoodsList-->
+      </tbody>
+    </table>
+    <!-- /.bottom -->
+  </div>
+  <!-- 新システム時代の買い物表示 -->
+  <div class="bottomTbl">
+    <table class="resist">
+      <tbody>
+        <tr>
+          <th>商品合計</th>
+          <td>¥8,910</td>
+        </tr>
+
+        <tr>
+          <th>送料</th>
+          <td>¥330</td>
+        </tr>
+
+        <!--tr>
+									<th>合計金額</th>
+									<td><span class="ttlPrice">&yen;9,240</span></td>
+								</tr-->
+
+        <tr>
+          <th>ZOZOポイント</th>
+
+          <td>¥0</td>
+        </tr>
+
+        <tr>
+          <th>支払い金額</th>
+          <td><span class="ttlPrice">¥9,240</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <!--/.bottomTbl-->
+  </div>
+
+  <div class="btnWrapper clearfix m-t-2xl">
+    <p class="btn"></p>
+    <div data-chatbot-trigger="return-exchange" data-label="返品・交換の手続き">
+      <button type="button" class="gBtnWhite btnM" data-process="false">
+        <span class="btnM">返品・交換の手続き</span>
+      </button>
+    </div>
+
+    <p></p>
+    <p class="textCenter textMuted t-spacing-md">
+      ※返品された場合、ご利用された特別クーポンは返還されません。
+    </p>
+
+    <!--/.sectionInner-->
+  </div>
+  <!-- /#itemdetail -->
+</div>

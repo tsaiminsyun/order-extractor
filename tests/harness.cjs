@@ -4,7 +4,7 @@ const path = require('path');
 const { JSDOM } = require('jsdom');
 
 const SRC = path.join(__dirname, '..', 'src', 'content');
-const FILES = ['util.js', 'readers.js', 'sites/amazon.js', 'sites/rakuten.js', 'sites/shopify.js', 'sites/tower.js', 'sites/pokemoncenter.js', 'sites/nijisanji.js', 'sites/animate.js', 'sites/mumo.js', 'main.js'];
+const FILES = ['util.js', 'readers.js', 'sites/amazon.js', 'sites/rakuten.js', 'sites/shopify.js', 'sites/tower.js', 'sites/pokemoncenter.js', 'sites/nijisanji.js', 'sites/animate.js', 'sites/mumo.js', 'sites/zozo.js', 'main.js'];
 
 function loadFiles(files) {
   delete globalThis.OrderScraper; // 重新載入時不要累積重複的站台

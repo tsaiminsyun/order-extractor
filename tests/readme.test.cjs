@@ -74,6 +74,9 @@ module.exports = async function run() {
       ['mypordhist03usr', 'src/content/sites/mumo.js'],
       ['td.cellDeliv', 'src/content/readers.js'],
       ['.txtTotal', 'src/content/readers.js'],
+      ['.orderDetailHeader-h', 'src/content/sites/zozo.js'],
+      ['td.orderTime', 'src/content/sites/zozo.js'],
+      ['.pager li.next a', 'src/content/sites/zozo.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);
