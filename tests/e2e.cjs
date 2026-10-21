@@ -27,7 +27,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`, `${ORIGIN}/_member/*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`, `${ORIGIN}/_member/*`, `${ORIGIN}/shop/*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -43,6 +43,7 @@ patch('src/content/sites/nijisanji.js', "/(^|\\.)shop\\.nijisanji\\.jp$/.test(lo
 patch('src/content/sites/animate.js', "/(^|\\.)animate-onlineshop\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/mumo.js', "/(^|\\.)mu-mo\\.net$/.test(loc.hostname)", 'true');
 patch('src/content/sites/zozo.js', "/(^|\\.)zozo\\.jp$/.test(loc.hostname)", 'true');
+patch('src/content/sites/plusmember.js', "/(^|\\.)plusmember\\.jp$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -331,6 +332,25 @@ const zozoDetail = `<!doctype html><html><body><table class="resist"><tbody>
 </tbody></table></div></body></html>`;
 const zozoHits = [];
 
+/* ---------- 模擬 plusmember（列表頁沒有配送狀態；詳細頁要送表單打開，fetch） ----------
+ * 結構照實際頁面（tests/fixtures/plusmember-*）。表單是造的（實際的沒拿到）。
+ *   PM1 一天前 → 讀詳細頁：佐川急便、お問い合わせ番号 → 列出
+ *   PM2 兩天前 → 讀詳細頁：還沒寄出（お問い合わせ番号那一組是空的）→ 不列
+ *   PM3 三十天前 → 超過七天，不讀 */
+const PLUS = { PM1: ['985000001', 1], PM2: ['985000002', 2], PM3: ['985000003', 30] };
+const plusRow = (key) => `<ul><li class="time">${isoDate(PLUS[key][1]).replace(/-/g, '/')} 13:50</li><li class="shop">Artist Goods Store</li>
+<li class="centertd id">${PLUS[key][0]}</li><li class="centertd payment">クレジットカード決済</li><li class="centertd total">￥14,380</li>
+<li class="centertd detail"><a href="/mypage/index.php" onclick="fnChangeAction('./history.php'); fnKeySubmit('order_id', '${PLUS[key][0]}'); return false;">詳細</a></li></ul>`;
+const plusList = `<!doctype html><html><body><div class="list"><ul class="tit"><li>購入日時</li><li>購入店舗</li><li>注文番号</li><li>お支払い方法</li><li>合計金額</li><li></li></ul>
+${['PM1', 'PM2', 'PM3'].map(plusRow).join('')}</div>
+<form name="form1" method="post" action="?"><input type="hidden" name="order_id" value=""><input type="hidden" name="token" value="tok1"></form></body></html>`;
+const plusDetail = (sent) => `<!doctype html><html><body><div class="mypage detail"><div class="data">
+<ul class="tit empty">${sent ? '<li>お問い合わせ番号</li><li>353912840945</li><li>追跡確認</li><li><a href="http://k2k.sagawa-exp.co.jp/p/sagawa/web/okurijoinput.jsp">お荷物のお問い合わせはコチラ</a></li>' : ''}</ul></div>
+<div class="item"><ul class="tit"><li>商品</li><li>単価(税込)</li><li>個数</li><li>小計</li></ul>
+<ul><li><a href="/shop/products/detail.php?product_id=1">【fromis_9】froming≪A Ver.≫</a><br /><span>8800000000001</span></li>
+<li class="price"><p>￥2,700</p></li><li class="quantity">2</li><li class="total">￥5,400</li></ul></div></div></body></html>`;
+const plusHits = [];  // 送了哪些詳細頁的請求
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -376,6 +396,17 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/_member/orderhistory/detail.html') {
     zozoHits.push(u.searchParams.get('oid'));
     return res.end(u.searchParams.get('oid') === ZOZO_ID.ZO1 ? zozoDetail : '');
+  }
+  if (u.pathname === '/shop/mypage/index.php') return res.end(plusList);
+  if (u.pathname === '/shop/mypage/history.php') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      plusHits.push(`${req.method} ${body}`);
+      const id = new URLSearchParams(body).get('order_id');
+      res.end(id === PLUS.PM1[0] ? plusDetail(true) : id === PLUS.PM2[0] ? plusDetail(false) : '');
+    });
+    return undefined;
   }
   if (u.pathname === '/avx/sv/mypordhist03usr') {
     // 詳細頁只接受 detail() 送的那張表單；回應用 Shift_JIS（舊式日本網站常見），驗證不會變亂碼
@@ -568,8 +599,22 @@ const eq = (label, actual, expected) => {
         [['hellam デニムジャケット（ブルー / FREE）', 2, 'https://c.imgz.jp/1/ZO1.jpg']]);
     }
 
+    // plusmember（列表頁沒有配送狀態 → 七天內的每一筆都送表單讀詳細頁）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/shop/mypage/index.php`);
+      console.log(`plusmember：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('plusmember 站台', result.site, 'plusmember');
+      // 兩筆同時送出，到達順序不固定
+      eq('plusmember 七天內的兩筆都送出表單（POST、欄位照頁面上的表單）', [...plusHits].sort(),
+        [`POST order_id=${PLUS.PM1[0]}&token=tok1`, `POST order_id=${PLUS.PM2[0]}&token=tok1`]);
+      eq('plusmember 只列出有お問い合わせ番号的那筆', result.orders.map((o) => [o.orderId, o.orderedAt, o.carrier, o.trackingId, o.total]),
+        [[PLUS.PM1[0], isoDate(1), '佐川急便', '353912840945', 14380]]);
+      eq('plusmember 品名 / 個数', result.orders[0]?.items.map((i) => [i.title, i.quantity]), [['【fromis_9】froming≪A Ver.≫', 2]]);
+      eq('plusmember 還沒寄出的不算「讀不到」', result.missingTracking, 0);
+    }
+
     // 只用 iframe，任何情況都不該開新分頁
-    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03|orderhistory\/detail/.test(u));
+    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03|orderhistory\/detail|shop\/mypage\/history/.test(u));
     console.log(`另開的分頁：${extra.length} 個`);
     eq('不開新分頁', extra, []);
     eq('沒有背景程式', (await browser.targets()).some((t) => t.type() === 'service_worker'), false);

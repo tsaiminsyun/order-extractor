@@ -77,6 +77,10 @@ module.exports = async function run() {
       ['.orderDetailHeader-h', 'src/content/sites/zozo.js'],
       ['td.orderTime', 'src/content/sites/zozo.js'],
       ['.pager li.next a', 'src/content/sites/zozo.js'],
+      ['fnKeySubmit(', 'src/content/sites/plusmember.js'],
+      ['お問い合わせ番号', 'src/content/readers.js'],
+      ['li.quantity', 'src/content/readers.js'],
+      ['formRequest', 'src/content/util.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

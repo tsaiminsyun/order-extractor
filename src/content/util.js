@@ -148,6 +148,24 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
   /* ---------- 另外載入頁面 ---------- */
 
+  /* 照瀏覽器送出表單的規則，組出跟頁面送出 form 一樣的請求（mu-mo、plusmember 的詳細頁
+   * 不是一般連結，是頁面的 JS 把代碼填進表單再送出）。
+   * 送出按鈕、沒勾的選項、停用的欄位都不帶；values 填進同名的欄位。
+   * POST 時欄位放在 body；GET 時欄位取代網址原本的查詢字串 */
+  function formRequest(form, action, values) {
+    const fields = new URLSearchParams();
+    for (const el of all(form, 'input[name], select[name], textarea[name]')) {
+      if (el.disabled || /^(?:submit|button|image|reset|file)$/i.test(el.type || '')) continue;
+      if (/^(?:checkbox|radio)$/i.test(el.type || '') && !el.checked) continue;
+      fields.append(el.name, el.value);
+    }
+    for (const [name, value] of Object.entries(values)) fields.set(name, value);
+    const url = new URL(action);
+    if (/^post$/i.test(attr(form, 'method'))) return { url: url.href, post: fields.toString() };
+    url.search = fields.toString();
+    return { url: url.href };
+  }
+
   /* 回應的編碼：Content-Type 的 charset → HTML 開頭的 <meta charset> → UTF-8。
    * res.text() 一律當 UTF-8 解，Shift_JIS / EUC-JP 的舊站會變成亂碼，標籤就比對不到 */
   async function decodeHtml(res) {
@@ -215,6 +233,6 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     nextPageLink, bumpPageParam,
     climbUnique, countContained, countMatches, outermost, byDocumentOrder,
     countOrderIds, cardsByOrderId,
-    fetchDoc, readInFrame,
+    formRequest, fetchDoc, readInFrame,
   };
 })();

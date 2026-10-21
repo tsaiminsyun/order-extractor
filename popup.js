@@ -12,6 +12,7 @@ const CONTENT_SCRIPTS = [
   "src/content/sites/animate.js",
   "src/content/sites/mumo.js",
   "src/content/sites/zozo.js",
+  "src/content/sites/plusmember.js",
   "src/content/main.js",
 ];
 

@@ -7,7 +7,7 @@
  */
 (() => {
   'use strict';
-  const { textOf, attr, all, parseDate, nextPageLink } = globalThis.OrderScraper.util;
+  const { textOf, attr, all, parseDate, nextPageLink, formRequest } = globalThis.OrderScraper.util;
 
   const SEL = {
     row: 'table.tableCart tr',
@@ -28,25 +28,14 @@
    *   document.jumpdetail.order_tel.value = tel;
    *   document.jumpdetail.submit();
    * 表單的 method 與其他欄位沒寫在裡面，所以不寫死，直接讀頁面上那張表單，
-   * 照瀏覽器送出表單的規則組出同樣的請求。頁面上沒有那張表單就回 null（detail() 本身也會失敗） */
+   * 照瀏覽器送出表單的規則組出同樣的請求（util.formRequest）。
+   * 頁面上沒有那張表單就回 null（detail() 本身也會失敗） */
   function detailRequest(doc, pageUrl, id, tel) {
     const form = doc.querySelector(SEL.form);
     if (!form) return null;
-    const fields = new URLSearchParams();
-    for (const el of all(form, 'input[name], select[name], textarea[name]')) {
-      // 跟瀏覽器一樣：送出按鈕、沒勾的選項、停用的欄位都不帶
-      if (el.disabled || /^(?:submit|button|image|reset|file)$/i.test(el.type || '')) continue;
-      if (/^(?:checkbox|radio)$/i.test(el.type || '') && !el.checked) continue;
-      fields.append(el.name, el.value);
-    }
-    fields.set('order_id', id);
-    fields.set('order_tel', tel);
     // detail() 寫的是 https://shop.mu-mo.net/…，在那個網站上就等於以目前頁面為基準的這個路徑
-    const action = new URL(`/avx/sv/mypordhist03usr?ordid=${id}`, pageUrl);
-    if (/^post$/i.test(attr(form, 'method'))) return { url: action.href, post: fields.toString() };
-    // GET 表單送出時，網址原本的查詢字串會整個被表單欄位取代
-    action.search = fields.toString();
-    return { url: action.href };
+    const action = new URL(`/avx/sv/mypordhist03usr?ordid=${id}`, pageUrl).href;
+    return formRequest(form, action, { order_id: id, order_tel: tel });
   }
 
   /* 一筆訂單：th.cellHead 那一列 → 欄位名稱列 → 一或多列資料。

@@ -451,4 +451,35 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     if (doc.querySelector('input[type="password"]')) return { signIn: true };
     return { ok: true, total: parseMoney(textOf(zozoValue(doc, '支払い金額'))), trackingIds: zozoTrackingIds(doc) };
   };
+
+  /* ---------- plusmember：購入履歴詳細（history.php） ---------- */
+
+  /* 伺服器渲染，fetch 取回就讀得到。標籤與值是同一個 ul.tit 裡相鄰的兩個 li：
+   *   お問い合わせ番号  <li>お問い合わせ番号</li><li>353912840945</li>。還沒寄出時整組是空的
+   *                     （頁面用 JS 把空的 ul.empty 藏起來）
+   *   配送業者          「追跡確認」那一格連到業者的查詢頁，由網域判斷（util.carrierOf）
+   *   商品              .item 裡一件一個 ul（ul.tit 是欄位名稱）：品名是商品連結（底下那串 JAN 不收），
+   *                     個数是 li.quantity。頁面上沒有商品圖
+   * 合計列表頁就有，這裡不讀。お問い合わせ番号只看過一個，所以一筆訂單就是一個包裹 */
+  const plusmemberValue = (doc, label) =>
+    all(doc, '.data ul.tit > li').find((li) => textOf(li) === label)?.nextElementSibling;
+
+  function plusmemberParcels(doc) {
+    const trackingId = textOf(plusmemberValue(doc, 'お問い合わせ番号')).replace(/-/g, '');
+    if (!/^[A-Za-z0-9]{8,}$/.test(trackingId)) return [];
+    const carrier = carrierOf(attr(plusmemberValue(doc, '追跡確認')?.querySelector('a[href]'), 'href'));
+    const items = all(doc, '.item ul:not(.tit)')
+      .map((ul) => ({
+        title: textOf(ul.querySelector('a')),
+        quantity: Number(textOf(ul.querySelector('li.quantity'))) || 1,
+        imageUrl: null,
+      }))
+      .filter((item) => item.title);
+    return [{ carrier, trackingId, items }];
+  }
+
+  globalThis.OrderScraper.readers.plusmemberDetail = async (doc) => {
+    if (doc.querySelector('input[type="password"]')) return { signIn: true };
+    return { ok: true, parcels: plusmemberParcels(doc) };
+  };
 })();
