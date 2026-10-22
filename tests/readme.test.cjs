@@ -81,6 +81,11 @@ module.exports = async function run() {
       ['お問い合わせ番号', 'src/content/readers.js'],
       ['li.quantity', 'src/content/readers.js'],
       ['formRequest', 'src/content/util.js'],
+      ['sl-lottery-checkout.checkouts-item', 'src/content/sites/kuji.js'],
+      ['div.shipment button', 'src/content/readers.js'],
+      ['.shipment-number-value', 'src/content/readers.js'],
+      ['.carrier-tracking-code', 'src/content/readers.js'],
+      ['sl-shipment-loots', 'src/content/readers.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

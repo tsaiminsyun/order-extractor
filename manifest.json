@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "訂單擷取（Amazon / 楽天 / Shopify / タワーレコード / ポケモンセンター / にじさんじ / アニメイト / mu-mo）",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "從 Amazon.co.jp、楽天市場、Shopify 商店、タワーレコード、ポケモンセンターオンライン、にじさんじオフィシャルストア、アニメイト通販、mu-mo ショップ、ZOZOTOWN、plusmember 的訂單列表擷取配送中的訂單，匯出 JSON",
   "action": {
     "default_popup": "popup.html",
@@ -51,6 +51,7 @@
         "src/content/sites/mumo.js",
         "src/content/sites/zozo.js",
         "src/content/sites/plusmember.js",
+        "src/content/sites/kuji.js",
         "src/content/main.js"
       ],
       "run_at": "document_idle"

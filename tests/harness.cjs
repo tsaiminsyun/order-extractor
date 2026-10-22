@@ -4,7 +4,7 @@ const path = require('path');
 const { JSDOM } = require('jsdom');
 
 const SRC = path.join(__dirname, '..', 'src', 'content');
-const FILES = ['util.js', 'readers.js', 'sites/amazon.js', 'sites/rakuten.js', 'sites/shopify.js', 'sites/tower.js', 'sites/pokemoncenter.js', 'sites/nijisanji.js', 'sites/animate.js', 'sites/mumo.js', 'sites/zozo.js', 'sites/plusmember.js', 'main.js'];
+const FILES = ['util.js', 'readers.js', 'sites/amazon.js', 'sites/rakuten.js', 'sites/shopify.js', 'sites/tower.js', 'sites/pokemoncenter.js', 'sites/nijisanji.js', 'sites/animate.js', 'sites/mumo.js', 'sites/zozo.js', 'sites/plusmember.js', 'sites/kuji.js', 'main.js'];
 
 function loadFiles(files) {
   delete globalThis.OrderScraper; // 重新載入時不要累積重複的站台
@@ -18,7 +18,8 @@ const loadReaders = () => loadFiles(['util.js', 'readers.js']);
 // jsdom 不會真的載入 iframe。這裡改成：設定 frame.src 時直接用 pages(url) 回傳的 HTML
 // 當成 contentDocument，模擬「同網域、讀得到 DOM」。
 // pages 回傳空值代表被擋下（例如 X-Frame-Options），比照真實情況：load 會觸發但讀不到 contentDocument。
-// 讀取器是在這個文件上真的跑一次，不是回傳假的結果
+// 讀取器是在這個文件上真的跑一次，不是回傳假的結果。
+// pages 也可以回傳 { html, setup(doc) }：setup 在文件建立後掛上頁面自己的程式（例如點了才換頁的單頁應用）
 function patchIframes(win, pages, asked) {
   const create = win.document.createElement.bind(win.document);
   win.document.createElement = (tag, ...rest) => {
@@ -31,9 +32,12 @@ function patchIframes(win, pages, asked) {
       get: () => '',
       set(url) {
         asked.push({ url });
-        const html = pages?.(url);
-        if (html) doc = new JSDOM(html, { url }).window.document;
-        else setTimeout(() => el.dispatchEvent(new win.Event('load')), 0);
+        const page = pages?.(url);
+        const html = page?.html ?? page;
+        if (html) {
+          doc = new JSDOM(html, { url }).window.document;
+          page.setup?.(doc);
+        } else setTimeout(() => el.dispatchEvent(new win.Event('load')), 0);
       },
     });
     return el;

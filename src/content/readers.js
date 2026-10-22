@@ -8,7 +8,7 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
 
 (() => {
   'use strict';
-  const { sleep, clean, textOf, attr, all, cls, parseMoney, carrierOf, absUrl, climbUnique } = globalThis.OrderScraper.util;
+  const { sleep, clean, textOf, attr, all, cls, parseMoney, parseDate, carrierOf, absUrl, climbUnique } = globalThis.OrderScraper.util;
 
   const RENDER_TIMEOUT_MS = 15000; // 等待前端渲染的上限
   const PARTIAL_WAIT_MS = 2000;    // 只出現部分欄位時，再等其他欄位的時間
@@ -482,4 +482,56 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     if (doc.querySelector('input[type="password"]')) return { signIn: true };
     return { ok: true, parcels: plusmemberParcels(doc) };
   };
+
+  /* ---------- ちいかわくじ：購入履歴詳細（/mypage/history/…）與配送情報（/exchange/history/…） ---------- */
+
+  /* Angular 前端渲染，只能在隱藏 iframe 裡等它畫出來。兩頁的網址都帶列表頁上沒有的 ID，
+   * 由站台轉接層在 iframe 裡點過去（見 sites/kuji.js），這裡只負責讀。
+   *   購入履歴詳細  .info-item 一格一個：.info-item-heading 是標籤（購入番号 / 購入日時 / 購入金額），
+   *                 .info-item-body 是值。「配送情報を見る」是 div.shipment 裡的按鈕，沒有連結
+   *   配送情報      引き換え番号 .shipment-number-value；配送業者 .carrier-name（「佐川急便 宅配便」）、
+   *                 伝票番号 .carrier-tracking-code；這個包裹裡的獎品依くじ分組（sl-shipment-loots）。
+   *                 配送情報頁上也有 .info-item（配送依頼日、配送料），但沒有「購入番号」，所以兩頁分得開 */
+  const kujiInfo = (doc, heading) =>
+    all(doc, '.info-item').find((item) => textOf(item.querySelector('.info-item-heading')) === heading)
+      ?.querySelector('.info-item-body');
+
+  // 還在 iframe 裡用（轉接層接著要點它），所以直接給按鈕元素
+  const readKujiCheckout = (doc) => ({
+    ok: true,
+    purchaseNo: textOf(kujiInfo(doc, '購入番号')),
+    orderedAt: parseDate(textOf(kujiInfo(doc, '購入日時'))),
+    total: parseMoney(textOf(kujiInfo(doc, '購入金額'))),
+    shipButton: doc.querySelector('div.shipment button'),
+  });
+  register('kujiCheckout', readKujiCheckout, (i) => bothReady(i.purchaseNo, i.shipButton));
+
+  // 品名帶上くじ名與賞：「あくび」這種獎品名單獨看不出是哪一件
+  const kujiPrizes = (doc) =>
+    all(doc, 'sl-shipment-loots .lottery').flatMap((lottery) => {
+      const name = textOf(lottery.querySelector('.lottery-name'));
+      return all(lottery, '.lottery-prize-item').map((prize) => ({
+        title: [
+          name,
+          textOf(prize.querySelector('.label-value')) + textOf(prize.querySelector('.label-suffix')),
+          textOf(prize.querySelector('.name')),
+        ].filter(Boolean).join(' '),
+        quantity: 1,
+        imageUrl: attr(prize.querySelector('.thumbnail-image'), 'src') || null,
+      }));
+    });
+
+  const kujiTrackingId = (doc) => {
+    const no = textOf(doc.querySelector('.carrier-tracking-code')).replace(/-/g, '');
+    return /^[A-Za-z0-9]{8,}$/.test(no) ? no : '';
+  };
+
+  const readKujiExchange = (doc) => ({
+    ok: true,
+    exchangeNo: textOf(doc.querySelector('.shipment-number-value')),
+    carrier: textOf(doc.querySelector('.carrier-name')),
+    trackingId: kujiTrackingId(doc),
+    items: kujiPrizes(doc),
+  });
+  register('kujiExchange', readKujiExchange, (i) => bothReady(i.exchangeNo, i.trackingId));
 })();

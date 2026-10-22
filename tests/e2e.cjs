@@ -44,6 +44,7 @@ patch('src/content/sites/animate.js', "/(^|\\.)animate-onlineshop\\.jp$/.test(lo
 patch('src/content/sites/mumo.js', "/(^|\\.)mu-mo\\.net$/.test(loc.hostname)", 'true');
 patch('src/content/sites/zozo.js', "/(^|\\.)zozo\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/plusmember.js', "/(^|\\.)plusmember\\.jp$/.test(loc.hostname)", 'true');
+patch('src/content/sites/kuji.js', "/(^|\\.)online-kuji\\.chiikawamarket\\.jp$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -351,6 +352,52 @@ const plusDetail = (sent) => `<!doctype html><html><body><div class="mypage deta
 <li class="price"><p>￥2,700</p></li><li class="quantity">2</li><li class="total">￥5,400</li></ul></div></div></body></html>`;
 const plusHits = [];  // 送了哪些詳細頁的請求
 
+/* ---------- 模擬ちいかわくじ（Angular 單頁應用：卡片與按鈕都沒有連結，點了才換頁） ----------
+ * 結構照實際頁面（tests/fixtures/kuji-*）。換頁用 history.pushState，內容向 /kuji-api/ 要了資料才畫出來。
+ *   卡片 0（KJ1）一天前購入，配送 EX1：佐川急便、伝票番号 → 列出
+ *   卡片 1（KJ2）兩天前購入，跟 KJ1 同一個配送 → 合併成一列，合計加總
+ *   卡片 2（KJ3）三十天前購入 → 超過七天，停在這裡，不點配送情報
+ *   卡片 3（KJ4）→ 不該被打開 */
+const KUJI = [['KJ1', 1, 'EX1', '¥5,500（税込）'], ['KJ2', 2, 'EX1', '¥3,300（税込）'], ['KJ3', 30, 'EX3', '¥1,100（税込）'], ['KJ4', 40, 'EX4', '¥1,100（税込）']];
+const kujiCard = ([id]) => `<sl-lottery-checkout class="checkouts-item" tabindex="0"><div sllayout="" class="item shipped layout-large">
+  <div class="item-info"><div class="machine">くじ ${id}</div><div class="plan">5回</div><div class="status">発送されました</div></div></div></sl-lottery-checkout>`;
+const kujiInfo = (heading, body) => `<div class="info-item"><div class="info-item-heading">${heading}</div><div class="info-item-body">${body}</div></div>`;
+const kujiDetail = ([id, age, , amount]) => `<sl-lottery-checkout class="checkout"><div class="item shipped"><div class="item-info"><div class="machine">くじ ${id}</div></div></div></sl-lottery-checkout>
+  <div class="shipment"><sl-button tabindex="0"><button class="button">配送情報を見る</button></sl-button></div>
+  <div class="info">${kujiInfo('購入番号', id)}${kujiInfo('購入日時', `${isoDate(age).replace(/-/g, '/')} 14:31`)}${kujiInfo('購入金額', amount)}</div>`;
+const kujiDelivery = (ex) => `<sl-shipment-item class="shipment"><div class="item"><div class="item-info">
+  <div class="shipment-number"><div class="shipment-number-label">引き換え番号</div><div class="shipment-number-value">26-0000-0000-${ex}</div></div>
+  <div class="status">発送されました</div></div></div></sl-shipment-item>
+  <div class="status-shipped tracking"><div class="carrier"><div class="carrier-tracking"><div class="carrier-tracking-body">
+    <div class="carrier-name">佐川急便 宅配便</div><div class="carrier-tracking-code">442609190811</div></div></div></div></div>
+  <div class="body"><sl-shipment-loots><div sllayout="" class="lottery layout-large"><div class="lottery-info"><div class="lottery-name">ちいかわ うさぎだらけくじ</div></div>
+    <div class="lottery-prizes"><div class="lottery-prize-item"><sl-lottery-prize class="lottery-prize-body">
+      <div class="thumbnail"><img class="thumbnail-image" src="https://media.app.slash.gift/a.jpeg.800"></div>
+      <div class="title"><div class="label"><div class="label-value">A</div><div class="label-suffix">賞</div></div><div class="name">ぬいぐるみ</div></div>
+    </sl-lottery-prize></div></div></div></sl-shipment-loots></div>`;
+const kujiApi = (route) => {
+  if (route === '/mypage/history') return { html: `<div class="checkouts">${KUJI.map(kujiCard).join('')}</div>`, links: KUJI.map(([id]) => `/mypage/history/${id}`) };
+  const purchase = KUJI.find(([id]) => route === `/mypage/history/${id}`);
+  if (purchase) return { html: kujiDetail(purchase), next: `/exchange/history/${purchase[2]}` };
+  return { html: kujiDelivery(route.split('/').pop()) };
+};
+// 每一頁都是同一個殼，由網址決定畫什麼（跟 Angular 一樣）。連結只存在 JS 裡，DOM 上沒有
+const kujiShell = `<!doctype html><html><body><div id="app"></div><script>
+const app = document.getElementById('app');
+const go = (to) => { history.pushState(null, '', to); route(); };
+async function route() {
+  app.innerHTML = '';
+  const { html, links, next } = await (await fetch('/kuji-api' + location.pathname)).json();
+  setTimeout(() => {
+    app.innerHTML = html;
+    document.querySelectorAll('sl-lottery-checkout.checkouts-item').forEach((card, i) => card.addEventListener('click', () => go(links[i])));
+    document.querySelector('div.shipment button')?.addEventListener('click', () => go(next));
+  }, 300);
+}
+route();
+</script></body></html>`;
+const kujiHits = [];  // 畫了哪些頁（向 /kuji-api/ 要了哪些資料）
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -396,6 +443,17 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/_member/orderhistory/detail.html') {
     zozoHits.push(u.searchParams.get('oid'));
     return res.end(u.searchParams.get('oid') === ZOZO_ID.ZO1 ? zozoDetail : '');
+  }
+  if (u.pathname === '/mypage/history' || /^\/(?:mypage|exchange)\/history\/\w+$/.test(u.pathname)) {
+    // 沒有 rules.json 涵蓋：XFO_DENY 時 iframe 一定被擋，驗證會報「讀不到」而不是無聲無息
+    if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
+    return res.end(kujiShell);
+  }
+  if (u.pathname.startsWith('/kuji-api/')) {
+    const route = u.pathname.slice('/kuji-api'.length);
+    kujiHits.push(route);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.end(JSON.stringify(kujiApi(route)));
   }
   if (u.pathname === '/shop/mypage/index.php') return res.end(plusList);
   if (u.pathname === '/shop/mypage/history.php') {
@@ -464,8 +522,9 @@ const eq = (label, actual, expected) => {
       .map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
     const driver = await browser.newPage();
     await driver.goto(`chrome-extension://${extId}/popup.html`);
-    const scrape = async (url) => {
+    const scrape = async (url, ready) => {
       await page.goto(url, { waitUntil: 'load' });
+      if (ready) await page.waitForSelector(ready); // 前端渲染的列表頁：等它畫出來（使用者也是看到列表才點圖示）
       const started = Date.now();
       const result = await driver.evaluate(async (u) => {
         const [tab] = await chrome.tabs.query({ url: u });
@@ -613,8 +672,29 @@ const eq = (label, actual, expected) => {
       eq('plusmember 還沒寄出的不算「讀不到」', result.missingTracking, 0);
     }
 
+    // ちいかわくじ（在隱藏 iframe 裡點卡片、點「配送情報を見る」，Angular 式的換頁）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/mypage/history`, 'sl-lottery-checkout.checkouts-item');
+      console.log(`ちいかわくじ：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('くじ 站台', result.site, 'kuji');
+      const opened = kujiHits.filter((h) => h !== '/mypage/history');
+      if (XFO_DENY) {
+        // iframe 被擋下：只試一次就停，報一個讀不到
+        eq('くじ iframe 被擋：沒打開任何一頁', opened, []);
+        eq('くじ iframe 被擋：報 1 個讀不到', [result.orders, result.missingTracking], [[], 1]);
+      } else {
+        eq('くじ 依序點開，到三十天前那張就停（不點它的配送情報）', opened,
+          ['/mypage/history/KJ1', '/exchange/history/EX1', '/mypage/history/KJ2', '/exchange/history/EX1', '/mypage/history/KJ3']);
+        eq('くじ 同一個配送只列一次，合計加總', result.orders.map((o) => [o.orderId, o.orderedAt, o.total, o.carrier, o.trackingId]),
+          [['26-0000-0000-EX1', isoDate(1), 8800, '佐川急便 宅配便', '442609190811']]);
+        eq('くじ 獎品', result.orders[0]?.items.map((i) => [i.title, i.quantity, i.imageUrl]),
+          [['ちいかわ うさぎだらけくじ A賞 ぬいぐるみ', 1, 'https://media.app.slash.gift/a.jpeg.800']]);
+        eq('くじ 沒有「讀不到」', result.missingTracking, 0);
+      }
+    }
+
     // 只用 iframe，任何情況都不該開新分頁
-    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03|orderhistory\/detail|shop\/mypage\/history/.test(u));
+    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03|orderhistory\/detail|shop\/mypage\/history|exchange\/history|mypage\/history\/\w/.test(u));
     console.log(`另開的分頁：${extra.length} 個`);
     eq('不開新分頁', extra, []);
     eq('沒有背景程式', (await browser.targets()).some((t) => t.type() === 'service_worker'), false);

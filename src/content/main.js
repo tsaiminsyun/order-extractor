@@ -144,7 +144,10 @@
       throw new Error('需要重新登入，請在分頁登入後再試一次');
     }
 
-    const { scanned, pages, atPageCap } = await scanOrders(site, days);
+    // 列表頁上沒有注文日、要一筆一筆點開才知道的站台（ちいかわくじ）自己掃描，七天的界線照樣由這裡給
+    const { scanned, pages, atPageCap } = site.scan
+      ? await site.scan({ isOld: (orderedAt) => isOld(orderedAt, days), progress })
+      : await scanOrders(site, days);
     // 只有七天內、而且有東西可擷取的才去讀詳細頁 —— 舊訂單讀了也不會列出來
     const orders = scanned.filter((o) => !isOld(o.orderedAt, days) && hasWork(o));
     progress({ phase: 'parsed', orders: orders.length });
