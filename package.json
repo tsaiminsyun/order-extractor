@@ -1,8 +1,8 @@
 {
   "name": "order-scraper-extension",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "private": true,
-  "description": "Amazon.co.jp / 楽天 / Shopify / タワーレコード / ポケモンセンター / にじさんじ / アニメイト / mu-mo / ZOZOTOWN / plusmember / ちいかわくじ 訂單擷取 Chrome 擴充功能",
+  "description": "Amazon.co.jp / 楽天 / Shopify / タワーレコード / ポケモンセンター / にじさんじ / アニメイト / mu-mo / ZOZOTOWN / plusmember / ちいかわくじ / OFFICIAL GOODS STORE 訂單擷取 Chrome 擴充功能",
   "scripts": {
     "test": "node tests/run.cjs",
     "e2e": "node tests/e2e.cjs"

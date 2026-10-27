@@ -86,6 +86,9 @@ module.exports = async function run() {
       ['.shipment-number-value', 'src/content/readers.js'],
       ['.carrier-tracking-code', 'src/content/readers.js'],
       ['sl-shipment-loots', 'src/content/readers.js'],
+      ['a[href*="/mypage/order/detail/"]', 'src/content/sites/officialgoods.js'],
+      ['.ogs-v2-list-item', 'src/content/readers.js'],
+      ['お問い合わせNo', 'src/content/readers.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

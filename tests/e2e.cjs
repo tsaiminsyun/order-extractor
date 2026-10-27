@@ -27,7 +27,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`, `${ORIGIN}/_member/*`, `${ORIGIN}/shop/*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`, `${ORIGIN}/_member/*`, `${ORIGIN}/shop/*`, `${ORIGIN}/ogs/*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -45,6 +45,7 @@ patch('src/content/sites/mumo.js', "/(^|\\.)mu-mo\\.net$/.test(loc.hostname)", '
 patch('src/content/sites/zozo.js', "/(^|\\.)zozo\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/plusmember.js', "/(^|\\.)plusmember\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/kuji.js', "/(^|\\.)online-kuji\\.chiikawamarket\\.jp$/.test(loc.hostname)", 'true');
+patch('src/content/sites/officialgoods.js', "/(^|\\.)official-goods-store\\.jp$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -398,6 +399,26 @@ route();
 </script></body></html>`;
 const kujiHits = [];  // 畫了哪些頁（向 /kuji-api/ 要了哪些資料）
 
+/* ---------- 模擬 OFFICIAL GOODS STORE（列表頁沒有配送狀態；詳細頁伺服器渲染，fetch） ----------
+ * 結構照實際頁面（tests/fixtures/officialgoods-*），店名路徑用 /ogs/。
+ *   OG1 一天前 → 讀詳細頁：お問い合わせNo → 列出
+ *   OG2 兩天前 → 讀詳細頁：還沒寄出（沒有お問い合わせNo）→ 不列
+ *   OG3 三十天前 → 超過七天，不讀 */
+const OGS = { OG1: ['peb_000000000001-00001', 1], OG2: ['peb_000000000002-00002', 2], OG3: ['peb_000000000003-00003', 30] };
+const ogsCard = (key) => `<a href="/ogs/mypage/order/detail/${OGS[key][0]}"><div class="ogs-v2-stack direction-vertical space-midium ogs-v2-card with-shadow">
+  <div class="ogs-v2-stack direction-horizontal"><p class="ogs-v2-label color-success">注文確定</p><p class="ogs-v2-text size-small">${isoDate(OGS[key][1])} 16:04:40に注文</p></div>
+  <p class="ogs-v2-text color-key weight-bold">${OGS[key][0]}</p><p class="ogs-v2-text weight-bold">¥14,280</p></div></a>`;
+const ogsList = `<!doctype html><html><body><div class="ogs-v2-section"><div class="ogs-v2-stack direction-vertical space-midium">
+${['OG1', 'OG2', 'OG3'].map(ogsCard).join('')}</div></div></body></html>`;
+const ogsDetail = (id, sent) => `<!doctype html><html><body><div class="ogs-v2-page-body"><ul class="ogs-v2-list"><li class="ogs-v2-list-item">
+  <img src="https://assets.official-goods-store.jp/product/PEB059/a.jpg" alt="アクリルキーホルダー">
+  <div class="ogs-v2-stack direction-vertical"><p class="ogs-v2-text">アクリルキーホルダー　　</p><p class="ogs-v2-text">¥2,000</p></div>
+  <div class="ogs-v2-stack direction-horizontal justify-between"><p class="ogs-v2-text">数量 2</p><p class="ogs-v2-text weight-bold">小計¥4,000</p></div></li></ul>
+  <div class="ogs-v2-stack direction-vertical"><p class="ogs-v2-text">受注番号</p><p class="ogs-v2-text weight-bold"><span>${id}</span></p></div>
+  <div class="ogs-v2-stack direction-vertical"><p class="ogs-v2-text">配送状況</p><p class="ogs-v2-text weight-bold color-success">${sent ? '出荷済み' : '出荷準備中'}</p>
+  ${sent ? '<p class="ogs-v2-text size-small">お問い合わせNo:492241203624</p>' : ''}</div></div></body></html>`;
+const ogsHits = [];  // 讀了哪幾筆的詳細頁
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -454,6 +475,14 @@ const server = http.createServer((req, res) => {
     kujiHits.push(route);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.end(JSON.stringify(kujiApi(route)));
+  }
+  if (u.pathname === '/ogs/mypage/') return res.end(ogsList);
+  if (u.pathname.startsWith('/ogs/mypage/order/detail/')) {
+    const id = u.pathname.split('/').pop();
+    ogsHits.push(id);
+    // fetch 不受 X-Frame-Options 影響：三種模式結果都該一樣
+    if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
+    return res.end(ogsDetail(id, id === OGS.OG1[0]));
   }
   if (u.pathname === '/shop/mypage/index.php') return res.end(plusList);
   if (u.pathname === '/shop/mypage/history.php') {
@@ -693,8 +722,21 @@ const eq = (label, actual, expected) => {
       }
     }
 
+    // OFFICIAL GOODS STORE（列表頁沒有配送狀態 → 七天內的每一筆都讀詳細頁）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/ogs/mypage/`);
+      console.log(`OFFICIAL GOODS STORE：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('OGS 站台', result.site, 'officialgoods');
+      eq('OGS 七天內的兩筆都讀了詳細頁', [...ogsHits].sort(), [OGS.OG1[0], OGS.OG2[0]]);
+      eq('OGS 只列出有お問い合わせNo 的那筆', result.orders.map((o) => [o.orderId, o.orderedAt, o.carrier, o.trackingId, o.total]),
+        [[OGS.OG1[0], isoDate(1), '', '492241203624', 14280]]);
+      eq('OGS 品名 / 数量 / 画像', result.orders[0]?.items.map((i) => [i.title, i.quantity, i.imageUrl]),
+        [['アクリルキーホルダー', 2, 'https://assets.official-goods-store.jp/product/PEB059/a.jpg']]);
+      eq('OGS 還沒寄出的不算「讀不到」', result.missingTracking, 0);
+    }
+
     // 只用 iframe，任何情況都不該開新分頁
-    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03|orderhistory\/detail|shop\/mypage\/history|exchange\/history|mypage\/history\/\w/.test(u));
+    const extra = openedTabs.filter((u) => /progress-tracker|purchase-history\/\?|order-details|order-history\/detail|mypordhist03|orderhistory\/detail|shop\/mypage\/history|exchange\/history|mypage\/history\/\w|mypage\/order\/detail/.test(u));
     console.log(`另開的分頁：${extra.length} 個`);
     eq('不開新分頁', extra, []);
     eq('沒有背景程式', (await browser.targets()).some((t) => t.type() === 'service_worker'), false);

@@ -534,4 +534,39 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     items: kujiPrizes(doc),
   });
   register('kujiExchange', readKujiExchange, (i) => bothReady(i.exchangeNo, i.trackingId));
+
+  /* ---------- OFFICIAL GOODS STORE：注文詳細（/{店}/mypage/order/detail/{受注番号}） ---------- */
+
+  /* 伺服器渲染，fetch 取回就讀得到。欄位是同一個直向 .ogs-v2-stack 裡「標籤一個 p、值接在後面」：
+   *   受注番号  用來確認拿到的真的是詳細頁 —— 版面變了或被導到別頁時，不能當成「還沒寄出」
+   *   配送状況  「出荷済み」，下一行「お問い合わせNo:492241203624」。**頁面上沒有配送業者**，留空
+   *   商品      .ogs-v2-list-item 一件一個：品名是第一段文字（「ぷに缶バッジ　BINING B　」，
+   *             全形空白收成一般空白，種類照留）、「数量 1」、圖 */
+  const ogsField = (doc, label) => all(doc, 'p.ogs-v2-text').find((p) => textOf(p) === label)?.parentElement;
+  const OGS_TRACKING_RE = /お問い合わせNo\s*[:：]\s*([A-Za-z0-9-]+)/g;
+
+  const ogsTrackingIds = (doc) => {
+    const ids = [...textOf(ogsField(doc, '配送状況')).matchAll(OGS_TRACKING_RE)].map((m) => m[1].replace(/-/g, ''));
+    return [...new Set(ids.filter((no) => /^[A-Za-z0-9]{8,}$/.test(no)))];
+  };
+
+  const ogsItems = (doc) =>
+    all(doc, '.ogs-v2-list-item')
+      .map((li) => {
+        const img = li.querySelector('img');
+        const texts = all(li, 'p').map(textOf);
+        return {
+          title: texts[0] || clean(attr(img, 'alt')),
+          quantity: Number(texts.map((t) => /^数量\s*(\d+)$/.exec(t)?.[1]).find(Boolean)) || 1,
+          imageUrl: attr(img, 'src') || null,
+        };
+      })
+      .filter((item) => item.title);
+
+  globalThis.OrderScraper.readers.ogsDetail = async (doc) => {
+    if (doc.querySelector('input[type="password"]')) return { signIn: true };
+    if (!ogsField(doc, '受注番号')) return { ok: false, error: '不是注文詳細頁' };
+    const items = ogsItems(doc);
+    return { ok: true, parcels: ogsTrackingIds(doc).map((trackingId) => ({ carrier: '', trackingId, items })) };
+  };
 })();
