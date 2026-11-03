@@ -1,8 +1,8 @@
-# 訂單擷取（Amazon.co.jp / 楽天市場 / Shopify / タワーレコード / ポケモンセンター / にじさんじ / アニメイト / mu-mo / ZOZOTOWN / plusmember / ちいかわくじ / OFFICIAL GOODS STORE）
+# 訂單擷取（Amazon.co.jp / 楽天市場 / Shopify / タワーレコード / ポケモンセンター / にじさんじ / アニメイト / mu-mo / ZOZOTOWN / plusmember / ちいかわくじ / OFFICIAL GOODS STORE / Weverse Shop）
 
 Chrome 擴充功能（Manifest V3），從訂單列表頁擷取配送中的訂單，匯出 JSON。
 
-支援 Amazon.co.jp、楽天市場、タワーレコード、ポケモンセンターオンライン、にじさんじオフィシャルストア、アニメイト通販、mu-mo ショップ、ZOZOTOWN、plusmember、ちいかわくじ、OFFICIAL GOODS STORE，以及**任何 Shopify 商店**。Shopify 那一層是用頁面特徵判斷的，
+支援 Amazon.co.jp、楽天市場、タワーレコード、ポケモンセンターオンライン、にじさんじオフィシャルストア、アニメイト通販、mu-mo ショップ、ZOZOTOWN、plusmember、ちいかわくじ、OFFICIAL GOODS STORE、Weverse Shop，以及**任何 Shopify 商店**。Shopify 那一層是用頁面特徵判斷的，
 不是網域白名單 —— 代購常用的 ちいかわマーケット、ナガノマーケット、各家官方周邊店等十幾個站都走同一套。
 
 供代購 / WMS 流程使用，所以取捨偏向**寧可留空，不要抓錯**：認不出來的欄位一律空著，不猜。
@@ -39,6 +39,8 @@ Chrome 擴充功能（Manifest V3），從訂單列表頁擷取配送中的訂�
      每張卡片要在隱藏 iframe 裡點開才讀得到，比其他站台慢（一張幾秒）。點圖示時才注入
    - OFFICIAL GOODS STORE：`official-goods-store.jp` 各店會員頁的注文履歴（一個網域底下好幾家店，路徑帶店名，例如 `/parkeunbin/`）。
      認版面特徵（連到 `/mypage/order/detail/` 的訂單卡片），不寫死路徑。點圖示時才注入
+   - Weverse Shop：`shop.weverse.io` 的注文履歴（日本語 / English / 繁體中文）。列表是前端畫出來的，**等訂單出現再點圖示**。
+     伝票番号要按「配送状況照会」才看得到，每顆按鈕在隱藏 iframe 裡按一次，比其他站台慢。認版面特徵，不寫死路徑。點圖示時才注入
 2. 點擴充功能圖示 —— **一打開就跑完**，表格上就是結果
 3. 取消不要的列，按「下載 JSON（N 筆）」（檔名會帶站台，例如 `amazon-orders-20261006-0930.json`）
 
@@ -58,7 +60,7 @@ Chrome 擴充功能（Manifest V3），從訂單列表頁擷取配送中的訂�
 ### 七天
 
 **只列出七天內下單的訂單**（含今天）。七天是「配送中」的替代條件：
-Shopify、ポケモンセンター、plusmember、ちいかわくじ、OFFICIAL GOODS STORE 與楽天英文介面讀不到送達狀態，七天前下的單多半已經到貨了。
+Shopify、ポケモンセンター、plusmember、ちいかわくじ、OFFICIAL GOODS STORE、Weverse Shop 與楽天英文介面讀不到送達狀態，七天前下的單多半已經到貨了。
 定義在 [main.js](src/content/main.js) 的 `RECENT_DAYS`，popup 不自己算日期。
 
 超過七天的訂單**連詳細頁都不讀** —— 讀了也不會列出來。
@@ -108,22 +110,23 @@ popup 關掉再打開時，content script 若還在跑上一次，就接著等�
 | plusmember | 列表頁的 `li.time`（購入日時）：`2026/05/19 13:50` |
 | ちいかわくじ | **詳細頁**的「購入日時」：`2024/12/07 14:31`。列表頁上沒有日期，要一張一張點開才知道（見「ちいかわくじの錨點」） |
 | OFFICIAL GOODS STORE | 列表頁的卡片：`2026-07-30 16:04:40に注文` |
+| Weverse Shop | 列表頁每組開頭的 `<time>`：`2026/11/03 10:41` / `Nov 3, 2026 10:41`。顯示的是使用者所在時區的時間，先取它，認不得才用 `datetime`（+09:00） |
 
 各站台寫法都不一樣，一律由 [util.js](src/content/util.js) 的 `parseDate` 轉成 `YYYY-MM-DD`。
 認不得的格式回 `null`，不猜 —— 猜錯會讓使用者漏抓或多抓。
 
 ## 各站台的差異
 
-| | Amazon.co.jp | 楽天市場 | Shopify | タワーレコード | ポケモンセンター | にじさんじ | アニメイト | mu-mo | ZOZOTOWN | plusmember | ちいかわくじ | OFFICIAL GOODS STORE |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 注文番号 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | **配送情報**的引き換え番号（一個包裹一個） | 列表頁（受注番号） |
-| 品名 | 列表頁 | 列表頁 | **注文詳細頁** | 列表頁 | **注文詳細頁**（列表頁只有第一件） | **注文詳細頁** | 列表頁 | **注文詳細頁**（列表頁只有「…他6商品」的摘要） | 列表頁（品牌＋品名＋顏色 / 尺寸） | **注文詳細頁** | **配送情報**（くじ名＋賞＋獎品名） | **注文詳細頁** |
-| 画像 | 列表頁 | 列表頁 | **商品 JSON**（`/products/{handle}.js`，訂單頁沒有圖） | 列表頁 | **注文詳細頁** | **注文詳細頁** | 列表頁 | **沒有**（兩頁都沒有商品圖） | 列表頁 | **沒有**（兩頁都沒有商品圖） | **配送情報** | **注文詳細頁** |
-| 数量 | 列表頁（`.product-image__qty`，沒有就是 1 件） | **注文詳細頁**（列表頁沒有，用品名對回去） | **注文詳細頁**（`headers~="ColumnQuantity"`） | 列表頁（`.ship-num`） | **注文詳細頁**（`select[aria-label="個数"]`） | **注文詳細頁**（`.cartitem-count-text`） | 列表頁（「9点」） | **注文詳細頁**（單價右邊那格） | 列表頁（「数量：1」） | **注文詳細頁**（`li.quantity`） | 一件一行，都是 1 | **注文詳細頁**（「数量 1」） |
-| 合計 | 列表頁 | **注文詳細頁**（支払い金額 / Total amount / 付款金額） | 列表頁，詳細頁的 `RowTotal` 覆蓋 | 列表頁（注文合計） | **注文詳細頁**（支払合計） | **注文詳細頁**（お支払い合計金額） | 列表頁（收合的「注文の詳細」裡的注文合計金額） | **注文詳細頁**（お支払い合計） | **注文詳細頁**（支払い金額） | 列表頁（合計金額） | **詳細頁**（購入金額，不含配送料） | 列表頁（等於詳細頁的総合計） |
-| 配送業者 / 伝票番号 | **配送状況頁**（每個包裹一頁） | 日文 / 繁中列表頁；英文介面的列表頁沒有，改由**注文詳細頁**提供 | **注文詳細頁**的 `.fulfillment` | 列表頁（業者名由查詢網址判斷） | **注文詳細頁**的送り状番号（業者名由查詢網址判斷） | **注文詳細頁**的配送伝票番号。**頁面上沒有業者，留空** | 列表頁（業者名由查詢網址判斷） | **注文詳細頁**的配送狀況格（「配送会社：ヤマト運輸」與伝票番号） | **注文詳細頁**的伝票番号。**頁面上沒有業者，留空** | **注文詳細頁**的お問い合わせ番号（業者名由查詢網址判斷） | **配送情報**的 `.carrier-name` / `.carrier-tracking-code` | **注文詳細頁**的お問い合わせNo。**頁面上沒有業者，留空** |
-| 擷取條件 | 有「配送状況を確認」按鈕，且狀態不是已送達 | 有伝票番号，且配送進度沒走到最後一步 | 商品有追蹤號 | 有配送問い合わせ番号，且出荷表示沒有「（受取済）」 | 進度是「発送済み」 | 商品標籤不是全部「着荷済み」 | 有配送伝票番号，且進度列沒走到最後一步「お届け済」 | 列表的配送状況不是出荷待ち / 配達完了，且詳細頁上那個包裹有伝票番号、不是配達完了 | 包裹的目前狀態不是「配達完了」，且詳細頁有伝票番号 | 詳細頁有お問い合わせ番号 | 配送情報有伝票番号 | 詳細頁有お問い合わせNo |
-| 另外載入的頁面 | iframe（前端渲染） | iframe（前端渲染） | `fetch`（伺服器渲染，快很多） | **不用** | `fetch`（伺服器渲染） | `fetch`（伺服器渲染） | **不用** | `fetch`，送出頁面上的表單（POST） | `fetch`（伺服器渲染） | `fetch`，送出頁面上的表單 | iframe，在裡面**點過去**（兩頁都沒有連結） | `fetch`（伺服器渲染） |
+| | Amazon.co.jp | 楽天市場 | Shopify | タワーレコード | ポケモンセンター | にじさんじ | アニメイト | mu-mo | ZOZOTOWN | plusmember | ちいかわくじ | OFFICIAL GOODS STORE | Weverse Shop |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 注文番号 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | 列表頁 | **配送情報**的引き換え番号（一個包裹一個） | 列表頁（受注番号） | 列表頁（代表注文番号） |
+| 品名 | 列表頁 | 列表頁 | **注文詳細頁** | 列表頁 | **注文詳細頁**（列表頁只有第一件） | **注文詳細頁** | 列表頁 | **注文詳細頁**（列表頁只有「…他6商品」的摘要） | 列表頁（品牌＋品名＋顏色 / 尺寸） | **注文詳細頁** | **配送情報**（くじ名＋賞＋獎品名） | **注文詳細頁** | 列表頁（選項跟品名不同時接在後面） |
+| 画像 | 列表頁 | 列表頁 | **商品 JSON**（`/products/{handle}.js`，訂單頁沒有圖） | 列表頁 | **注文詳細頁** | **注文詳細頁** | 列表頁 | **沒有**（兩頁都沒有商品圖） | 列表頁 | **沒有**（兩頁都沒有商品圖） | **配送情報** | **注文詳細頁** | 列表頁 |
+| 数量 | 列表頁（`.product-image__qty`，沒有就是 1 件） | **注文詳細頁**（列表頁沒有，用品名對回去） | **注文詳細頁**（`headers~="ColumnQuantity"`） | 列表頁（`.ship-num`） | **注文詳細頁**（`select[aria-label="個数"]`） | **注文詳細頁**（`.cartitem-count-text`） | 列表頁（「9点」） | **注文詳細頁**（單價右邊那格） | 列表頁（「数量：1」） | **注文詳細頁**（`li.quantity`） | 一件一行，都是 1 | **注文詳細頁**（「数量 1」） | 列表頁（「1 個」/「Total (1) item」/「1個」） |
+| 合計 | 列表頁 | **注文詳細頁**（支払い金額 / Total amount / 付款金額） | 列表頁，詳細頁的 `RowTotal` 覆蓋 | 列表頁（注文合計） | **注文詳細頁**（支払合計） | **注文詳細頁**（お支払い合計金額） | 列表頁（收合的「注文の詳細」裡的注文合計金額） | **注文詳細頁**（お支払い合計） | **注文詳細頁**（支払い金額） | 列表頁（合計金額） | **詳細頁**（購入金額，不含配送料） | 列表頁（等於詳細頁的総合計） | **留空**（只在注文詳細頁，詳細頁的網址拿不到） |
+| 配送業者 / 伝票番号 | **配送状況頁**（每個包裹一頁） | 日文 / 繁中列表頁；英文介面的列表頁沒有，改由**注文詳細頁**提供 | **注文詳細頁**的 `.fulfillment` | 列表頁（業者名由查詢網址判斷） | **注文詳細頁**的送り状番号（業者名由查詢網址判斷） | **注文詳細頁**的配送伝票番号。**頁面上沒有業者，留空** | 列表頁（業者名由查詢網址判斷） | **注文詳細頁**的配送狀況格（「配送会社：ヤマト運輸」與伝票番号） | **注文詳細頁**的伝票番号。**頁面上沒有業者，留空** | **注文詳細頁**的お問い合わせ番号（業者名由查詢網址判斷） | **配送情報**的 `.carrier-name` / `.carrier-tracking-code` | **注文詳細頁**的お問い合わせNo。**頁面上沒有業者，留空** | 「配送状況照会」**按了才跳出的彈窗** |
+| 擷取條件 | 有「配送状況を確認」按鈕，且狀態不是已送達 | 有伝票番号，且配送進度沒走到最後一步 | 商品有追蹤號 | 有配送問い合わせ番号，且出荷表示沒有「（受取済）」 | 進度是「発送済み」 | 商品標籤不是全部「着荷済み」 | 有配送伝票番号，且進度列沒走到最後一步「お届け済」 | 列表的配送状況不是出荷待ち / 配達完了，且詳細頁上那個包裹有伝票番号、不是配達完了 | 包裹的目前狀態不是「配達完了」，且詳細頁有伝票番号 | 詳細頁有お問い合わせ番号 | 配送情報有伝票番号 | 詳細頁有お問い合わせNo | 有「配送状況照会」按鈕，且彈窗裡有伝票番号 |
+| 另外載入的頁面 | iframe（前端渲染） | iframe（前端渲染） | `fetch`（伺服器渲染，快很多） | **不用** | `fetch`（伺服器渲染） | `fetch`（伺服器渲染） | **不用** | `fetch`，送出頁面上的表單（POST） | `fetch`（伺服器渲染） | `fetch`，送出頁面上的表單 | iframe，在裡面**點過去**（兩頁都沒有連結） | `fetch`（伺服器渲染） | iframe，在裡面**按按鈕** |
 
 ## 為什麼一定要多讀一頁
 
@@ -132,6 +135,7 @@ popup 關掉再打開時，content script 若還在跑上一次，就接著等�
 
 | 站台 | 列表頁缺什麼 | 查證 |
 | --- | --- | --- |
+| Weverse Shop | 配送業者、伝票番号 | 列表頁與詳細頁都沒有，要按「配送状況照会」跳出彈窗才看得到 |
 | OFFICIAL GOODS STORE | お問い合わせNo、商品、数量 | 列表頁的卡片只有ご注文状況（「注文確定」）、注文日時、受注番号、金額 |
 | ちいかわくじ | 全部：購入番号、日期、配送業者、伝票番号、獎品、金額 | 列表頁的卡片只有くじ名、回數、狀態與圖片，**連連結都沒有** |
 | plusmember | 配送業者、お問い合わせ番号、商品、個数 | 列表頁只有購入日時、購入店舗、注文番号、お支払い方法、合計金額，連配送狀態都沒有 |
@@ -155,6 +159,7 @@ popup 關掉再打開時，content script 若還在跑上一次，就接著等�
 - plusmember 的列表頁看不出寄出了沒，七天內的每一筆都要讀（跟 Shopify 一樣）
 - ちいかわくじ 由新到舊一張一張點開，點到第一張購入日時超過七天的就停（那一張不再點配送情報）
 - OFFICIAL GOODS STORE 的列表頁看不出寄出了沒（卡片上的狀態是「注文確定」），七天內的每一筆都要讀
+- Weverse Shop 只按七天內、有「配送状況照会」按鈕的（「お支払い済み」的時候還沒有這顆按鈕）
 
 ## 只擷取配送中的訂單
 
@@ -170,6 +175,7 @@ popup 關掉再打開時，content script 若還在跑上一次，就接著等�
 | ZOZOTOWN | 包裹的目前狀態（`.orderDetailHeader-h`）不是「配達完了」，而且進度列（`data-step` / `data-max-step`）沒走到最後一步 | 這裡比對文字是安全的：那個標籤只放目前的狀態，不是進度列上那一串步驟名稱。9 月以前的包裹沒有進度列，只能看標籤 |
 | mu-mo | 列表的配送状況不是「出荷待ち」/「配達完了」；詳細頁再逐個包裹看配送狀況格的第一行是不是「配達完了」 | 配送中的字樣還沒看過（實際頁面只有這兩種），所以反過來：確定沒東西在路上的才跳過，其餘一律讀詳細頁 |
 | アニメイト | 進度列（`.order-tracking__timeline`）的目前這一步 `li.current` 不是最後一步 | 進度是 注文受付 → お支払い → 商品準備中 → 出荷作業中 → お届け済。跟楽天一樣，「お届け済」是最後一步的名稱、每一筆都看得到，所以只能用結構判斷 |
+| Weverse Shop | 彈窗裡有伝票番号就算 | 狀態只看過「お支払い済み」「配送準備中」，送達後的寫法還沒看過。彈窗的進度列（配送準備中 → 配送中 → 配送済み）每一步的名稱都會顯示，不能比對文字；目前這一步只靠雜湊 class 區分，改版就變 |
 | OFFICIAL GOODS STORE | 詳細頁有お問い合わせNo 就算 | 配送状況只看過「出荷済み」：三個月前的訂單現在也還是，**沒有送達狀態** |
 | ちいかわくじ | 配送情報有伝票番号就算 | 狀態只看過「発送されました」：2025 年 5 月寄出的包裹現在也還是，**沒有送達狀態** |
 | plusmember | 詳細頁有お問い合わせ番号就算 | 詳細頁的狀態（「支払ステータス」）只到「発送完了」，**沒有送達狀態** |
@@ -182,7 +188,7 @@ Amazon 則相反，只有文字可用 —— 整個包裹區塊裡沒有任何�
 所以只比對**實際看過的三個語系**的字樣；簡體中文要連「已」一起比對，
 因為在途顯示的是「预计…送达」，只比「送达」會把在途的也濾掉。
 
-**判斷不出來時一律保留。** 漏掉一個還在路上的包裹，比多出一筆已送達的嚴重。目前有六個判斷不到的地方：
+**判斷不出來時一律保留。** 漏掉一個還在路上的包裹，比多出一筆已送達的嚴重。目前有七個判斷不到的地方：
 
 - **楽天的英文介面**沒有配送進度列（列表頁連配送資訊都沒有），擋不掉已送達的。要過濾請用日文或繁中介面
 - **Shopify** 的訂單狀態只到「已出貨」（fulfilled），站台本身就不知道包裹有沒有送達。
@@ -191,8 +197,9 @@ Amazon 則相反，只有文字可用 —— 整個包裹區塊裡沒有任何�
 - **plusmember** 的詳細頁最多到「発送完了」。fixture 裡 5 月出貨的訂單，詳細頁上也還是「発送完了」
 - **ちいかわくじ** 的狀態最多到「発送されました」。fixture 裡 2025 年 5 月寄出的包裹，現在也還是「発送されました」
 - **OFFICIAL GOODS STORE** 的配送状況最多到「出荷済み」。fixture 裡 7 月下單的訂單，現在也還是「出荷済み」
+- **Weverse Shop** 送達後的狀態還沒看過（fixture 的訂單是當天的），先只靠七天。看到實際寫法再補
 
-這六個都是**站台本身就沒有這筆資料**，不是解析沒做到。目前先這樣，已送達的會混進這六個的結果裡。
+前六個都是**站台本身就沒有這筆資料**，不是解析沒做到；Weverse Shop 是還沒看過。目前先這樣，已送達的會混進這七個的結果裡。
 
 ## 輸出格式
 
@@ -228,6 +235,7 @@ Amazon 則相反，只有文字可用 —— 整個包裹區塊裡沒有任何�
 - ZOZOTOWN 的「まとめて発送」是好幾筆訂單合併成一個包裹：每筆訂單各一列、伝票番号相同、商品只放那筆訂單自己的
 - 楽天、ポケモンセンター、にじさんじ、アニメイト、OFFICIAL GOODS STORE 不標示商品與包裹的對應，所以同一筆訂單的商品會掛在它的每個伝票番号下
 - にじさんじ、ZOZOTOWN 與 OFFICIAL GOODS STORE 的頁面上沒有配送業者，`carrier` 一律是空字串
+- Weverse Shop 一個代表注文番号底下依賣家分段，一段一顆「配送状況照会」，**一顆按鈕一個包裹**，商品是那一段的。`total` 一律是 `null`（合計只在詳細頁上）
 - plusmember 一筆訂單只看過一個お問い合わせ番号，商品都掛在那個包裹下
 - ちいかわくじ 是抽完之後另外申請配送，一次配送可以包含好幾次購入的獎品，所以 `orderId` 是配送情報的**引き換え番号**（不是購入番号），一個包裹一列。
   `orderedAt` 是購入日時，`total` 是這個包裹裡那幾次購入的購入金額加總（不含配送料），`carrier` 照頁面寫的「佐川急便 宅配便」
@@ -246,13 +254,14 @@ content script 依站台拆開，共用同一套流程（manifest 依序載入�
 | 檔案 | 用途 |
 | --- | --- |
 | [util.js](src/content/util.js) | 共用小工具、切出訂單範圍（`climbUnique` / `cardsByOrderId`）、照瀏覽器規則組出送出表單的請求（`formRequest`）、`fetch` 下一頁、隱藏 iframe 載入 |
-| [readers.js](src/content/readers.js) | 另外載入的頁面的讀取器：Amazon 配送狀況頁 / 楽天 注文詳細頁（隱藏 iframe）、Shopify / ポケモンセンター / にじさんじ / mu-mo / ZOZOTOWN / plusmember / OFFICIAL GOODS STORE 注文詳細頁（`fetch`）、ちいかわくじ 購入履歴詳細 / 配送情報（隱藏 iframe） |
-| [sites/amazon.js](src/content/sites/amazon.js)、[sites/rakuten.js](src/content/sites/rakuten.js)、[sites/shopify.js](src/content/sites/shopify.js)、[sites/tower.js](src/content/sites/tower.js)、[sites/pokemoncenter.js](src/content/sites/pokemoncenter.js)、[sites/nijisanji.js](src/content/sites/nijisanji.js)、[sites/animate.js](src/content/sites/animate.js)、[sites/mumo.js](src/content/sites/mumo.js)、[sites/zozo.js](src/content/sites/zozo.js)、[sites/plusmember.js](src/content/sites/plusmember.js)、[sites/kuji.js](src/content/sites/kuji.js)、[sites/officialgoods.js](src/content/sites/officialgoods.js) | 各站台的列表頁解析，回報要另外讀取哪些頁 |
+| [readers.js](src/content/readers.js) | 另外載入的頁面的讀取器：Amazon 配送狀況頁 / 楽天 注文詳細頁（隱藏 iframe）、Shopify / ポケモンセンター / にじさんじ / mu-mo / ZOZOTOWN / plusmember / OFFICIAL GOODS STORE 注文詳細頁（`fetch`）、Weverse Shop 配送状況照会的彈窗（隱藏 iframe）、ちいかわくじ 購入履歴詳細 / 配送情報（隱藏 iframe） |
+| [sites/amazon.js](src/content/sites/amazon.js)、[sites/rakuten.js](src/content/sites/rakuten.js)、[sites/shopify.js](src/content/sites/shopify.js)、[sites/tower.js](src/content/sites/tower.js)、[sites/pokemoncenter.js](src/content/sites/pokemoncenter.js)、[sites/nijisanji.js](src/content/sites/nijisanji.js)、[sites/animate.js](src/content/sites/animate.js)、[sites/mumo.js](src/content/sites/mumo.js)、[sites/zozo.js](src/content/sites/zozo.js)、[sites/plusmember.js](src/content/sites/plusmember.js)、[sites/kuji.js](src/content/sites/kuji.js)、[sites/officialgoods.js](src/content/sites/officialgoods.js)、[sites/weverse.js](src/content/sites/weverse.js) | 各站台的列表頁解析，回報要另外讀取哪些頁 |
 | [main.js](src/content/main.js) | 掃描列表（自動翻頁）、讀取詳細資料、七天與 tracking ID 的規則、訊息處理（`PING` / `SCRAPE`） |
 
 站台轉接層的介面只有三個：`isOrderPage(loc, doc)` / `isSignInPage` / `findOrders`。
 要加新站台就多一個 `sites/*.js`，`main.js` 不用改。
 列表頁上看不到注文日、要一筆一筆點開才知道的站台（ちいかわくじ）改提供 `scan`，自己跑完掃描；七天的界線照樣由 `main.js` 給。
+要另外讀的頁面（`lookups`）可以帶 `args`，原樣交給讀取器 —— 同一頁要讀不同地方時用（Weverse Shop 在同一頁上按不同的按鈕）。
 
 `isOrderPage` 收得到 `doc`，所以站台可以用**頁面特徵**判斷而不是網域 —— Shopify 轉接層就是這樣
 一次吃下所有 Shopify 商店的。
@@ -539,6 +548,27 @@ iframe 打不開（被擋下、逾時、需要重新登入）時報一個「讀�
 標籤與值是同一個直向 `.ogs-v2-stack` 裡的幾個 `p`。詳細頁上找不到「受注番号」時（版面變了、被導到別頁），
 不當成「還沒寄出」，而是算進「讀不到配送資料」。
 
+### Weverse Shopの錨點
+
+React（styled-components / MUI）做的頁面，class 是雜湊（`sc-a86c4f1c-7 dXVVlP`），每次改版都會變，**一個都不用**。
+只靠不會變的東西：每組訂單前面那顆 radio、`<time>`、按鈕上的字、彈窗的 `role="dialog"` 與表格的標籤。
+
+列表頁一個代表注文番号一組，組裡依賣家分段，每段有自己的商品與「配送状況照会」按鈕（出貨流程開始之後才有）。
+**伝票番号不在任何頁面上**，要按那顆按鈕跳出彈窗才看得到，所以在隱藏 iframe 裡打開同一頁、按同一顆按鈕再讀彈窗。
+一顆按鈕一個 iframe，同時進行。
+
+| 欄位 | 錨點 |
+| --- | --- |
+| 訂單頁判斷 | 網域是 weverse.io，而且有 `input[type="radio"][id^="orderSheetGroup_"]` |
+| 代表注文番号 / 一組的範圍 | 那顆 radio 的 `id`（`orderSheetGroup_124145358465579817`）；它的父元素就是整組 |
+| 注文日 | 組裡的 `<time>` |
+| 商品 | 組裡的 `li`：`dl > p` 是品名，`dl > span` 是「選項 / 數量」（取最後一個「/」後面的數字），圖是 `img` |
+| 配送状況照会 | 組裡文字是「配送状況照会」/「Track Order」/「查詢貨態」的 `<button>`。iframe 裡用「這一組的第幾個 `<button>`」找回同一顆 |
+| 伝票番号 / 配送業者 | 彈窗（`[role="dialog"]`）表格裡 `th` 是「伝票番号」「配送業者」（英：Tracking Number / Delivery service，繁中：託運單號 / 配送公司）的那一列的 `td` |
+| 合計 | **留空**。只在注文詳細頁（合計金額），但列表頁的商品連結是 `href="#none"`，詳細頁的網址拿不到 |
+
+彈窗出現了但沒有表格時，不當成「沒有伝票番号」，而是算進「讀不到配送資料」；有表格但沒有伝票番号那一列才算還沒有號碼。
+
 ### 另外載入的頁面
 
 Amazon 的配送狀況頁與楽天的注文詳細頁都是前端渲染，`fetch` 只拿得到空殼，必須讓瀏覽器真的載入。
@@ -554,6 +584,7 @@ iframe 設了 `sandbox`（不給 `allow-top-navigation`），對方頁面的防�
 
 ちいかわくじ的兩頁連網址都拿不到，是在 iframe 裡**點過去**的：iframe 載入購入履歴之後，點卡片、點按鈕都由頁面自己的程式換頁（`history.pushState`），
 同一份文件裡等新內容畫出來再讀（一樣是上限 15 秒、部分欄位再等 2 秒）。
+Weverse Shop也一樣：iframe 載入注文履歴之後按「配送状況照会」，等彈窗畫出來再讀。
 
 樂天的購買履歷頁會回 `x-frame-options: DENY`，所以 [rules.json](rules.json) 是**必要的**，不是最佳化 —
 少了它，樂天的合計就抓不到。規則用 `declarativeNetRequest` 在**子框架請求**上移除這個標頭，
@@ -564,7 +595,7 @@ Amazon 的配送狀況頁目前沒有這個標頭，也加了一條預防性的�
 
 ## 多語系
 
-只比對**實際出現過**的字樣，不做其他語言的推測。Amazon 支援日本語 / English / 简体中文，楽天支援日本語 / English / 繁體中文，ポケモンセンター、にじさんじ、アニメイト、mu-mo、ZOZOTOWN、plusmember、ちいかわくじ、OFFICIAL GOODS STORE 只看過日文頁面。
+只比對**實際出現過**的字樣，不做其他語言的推測。Amazon 支援日本語 / English / 简体中文，楽天支援日本語 / English / 繁體中文，ポケモンセンター、にじさんじ、アニメイト、mu-mo、ZOZOTOWN、plusmember、ちいかわくじ、OFFICIAL GOODS STORE 只看過日文頁面。Weverse Shop支援日本語 / English / 繁體中文（同一筆訂單三種語言都有實際頁面）。
 
 Amazon 各語系的實際字樣（同一筆訂單）：
 
@@ -593,6 +624,15 @@ Amazon 各語系的實際字樣（同一筆訂單）：
 
 日文與繁中的列表頁同一批訂單各存了一份 fixture，測試要求兩份讀到一模一樣的結果。
 
+Weverse Shop各語系的實際字樣（同一筆訂單）。按鈕文字在 [sites/weverse.js](src/content/sites/weverse.js) 的 `TRACK_BUTTON_RE`，
+彈窗的標籤在 [readers.js](src/content/readers.js) 的 `WEVERSE_LABELS`：
+
+| | 按鈕 | 伝票番号 | 配送業者 | 數量 | 注文日 |
+| --- | --- | --- | --- | --- | --- |
+| 日本語 | `配送状況照会` | `伝票番号` | `配送業者` | `/ 1 個` | `2026/11/03 10:41` |
+| English | `Track Order` | `Tracking Number` | `Delivery service` | `/ Total (1) item` | `Nov 3, 2026 10:41` |
+| 繁體中文 | `查詢貨態` | `託運單號` | `配送公司` | `/ 1個` | `2026/11/03 10:41` |
+
 ## 測試
 
 ```sh
@@ -613,7 +653,7 @@ E2E 會把整個擴充功能複製一份到暫存目錄、把網域換成 localh
 它用擴充功能自己的 popup 頁當驅動（沒有 service worker 可用了），並檢查**全程沒有另開分頁**。
 
 [tests/fixtures/](tests/fixtures/) 全部是**實際頁面**，`amazon-real.test.cjs`、`rakuten.test.cjs`、
-`shopify.test.cjs`、`tower.test.cjs`、`pokemoncenter.test.cjs`、`nijisanji.test.cjs`、`animate.test.cjs`、`mumo.test.cjs`、`zozo.test.cjs`、`plusmember.test.cjs`、`kuji.test.cjs`、`officialgoods.test.cjs` 直接對這些檔案跑解析，所以站台改版導致的解析失敗會被測出來：
+`shopify.test.cjs`、`tower.test.cjs`、`pokemoncenter.test.cjs`、`nijisanji.test.cjs`、`animate.test.cjs`、`mumo.test.cjs`、`zozo.test.cjs`、`plusmember.test.cjs`、`kuji.test.cjs`、`officialgoods.test.cjs`、`weverse.test.cjs` 直接對這些檔案跑解析，所以站台改版導致的解析失敗會被測出來：
 
 | fixture | 內容 |
 | --- | --- |
@@ -644,6 +684,8 @@ E2E 會把整個擴充功能複製一份到暫存目錄、把網域換成 localh
 | `kuji-delivery-jp` | 那次配送的配送情報：引き換え番号 / 佐川急便 宅配便 / 伝票番号 / 獎品 5 件。測試照 Angular 的行為造一個點了才換頁的列表，內容用這三份 |
 | `officialgoods-list-jp` | OFFICIAL GOODS STORE 注文履歴（`.ogs-v2-section` 那一段）：1 筆，注文確定 |
 | `officialgoods-detail-jp` | 那一筆的注文詳細：配送状況「出荷済み」/ お問い合わせNo / 商品 8 件 / 総合計 |
+| `weverse-list-{jp,en,tw}` | Weverse Shop 注文履歴的一組，同一筆訂單的三種語言：配送準備中，有「配送状況照会」按鈕 |
+| `weverse-tracking-{jp,en,tw}` | 按那顆按鈕跳出的彈窗：伝票番号 / 配送業者（使用者貼在列表檔案的最後面，這裡拆開）。測試照 React 的行為造一個按了才跳彈窗的列表，內容用這幾份 |
 
 > fixture 都是實際頁面，但**姓名 / 讀音 / 住址 / 電話 / email / 卡號已置換成假資料**（倉庫是公開的）。測試不依賴這些欄位。
 > 未經置換的原始頁面放在 `tmp/`，已在 `.gitignore` 內。
@@ -669,6 +711,8 @@ fixture 清單是否齊全、fixture 有沒有混進個資。改了程式忘了�
 - ちいかわくじ 點卡片、點按鈕的流程只在 E2E 的模擬頁面上跑過（照實際頁面的結構造的），實際站台還沒驗證。
   也假設列表是新到舊排的（跟其他站台一樣）。只看目前畫在頁面上的卡片，沒有翻頁；
   一次購入有好幾個配送時只點第一個「配送情報を見る」（實際只看過一個）
+- Weverse Shop 按按鈕、讀彈窗的流程只在 E2E 的模擬頁面上跑過（照實際頁面的結構造的），實際站台還沒驗證。
+  合計留空（詳細頁的網址拿不到）。分頁還沒看過，只讀目前畫在頁面上的訂單。日本語 / English / 繁體中文以外的語言認不得按鈕
 - OFFICIAL GOODS STORE 只看過一個お問い合わせNo。一筆訂單有好幾個號碼時，每個號碼都會掛上那筆訂單的全部商品
 - にじさんじ的列表帶 `data-show-init="12"`，看起來一次只顯示 12 筆、其餘要按按鈕載入。那個按鈕還沒看過：
   如果其餘的訂單已經在 HTML 裡只是先藏起來，照樣讀得到；如果是按了才去要，就只讀得到前 12 筆
@@ -679,7 +723,7 @@ fixture 清單是否齊全、fixture 有沒有混進個資。改了程式忘了�
 - plusmember 的 `fnChangeAction` / `fnKeySubmit` 原始碼與那張表單都沒拿到，測試裡的表單是造的，POST / GET 兩種都驗。
   列表頁的實際網址也還沒看過（只影響 `./history.php` 怎麼解析，測試用 `/shop/mypage/index.php`）。
   お問い合わせ番号只看過一個，一筆訂單有好幾個號碼時的寫法還不知道
-- 只擷取**配送中**的包裹。楽天的英文介面、Shopify、ポケモンセンター、plusmember、ちいかわくじ、OFFICIAL GOODS STORE 讀不到送達狀態，已送達的會混進來（見「只擷取配送中的訂單」）
+- 只擷取**配送中**的包裹。楽天的英文介面、Shopify、ポケモンセンター、plusmember、ちいかわくじ、OFFICIAL GOODS STORE、Weverse Shop 讀不到送達狀態，已送達的會混進來（見「只擷取配送中的訂單」）
 - 只解析訂單列表頁與配送狀況頁 / 注文詳細頁，不會讀配送先住所、支付方式、單價
 - 另外載入的頁面一律走隱藏 iframe。站台若擋住嵌入（`x-frame-options` / `content-security-policy: frame-ancestors`）
   且 [rules.json](rules.json) 沒涵蓋到，那一頁就讀不到，相關欄位留空

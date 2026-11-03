@@ -46,9 +46,10 @@
     return readInFrame(url, read);
   }
 
-  async function readPage({ url, reader, via, post }) {
+  // args 原樣交給讀取器：同一頁要讀不同地方時用（Weverse 同一頁上按不同的按鈕）
+  async function readPage({ url, reader, via, post, args }) {
     try {
-      const info = await withPage(url, via, (doc) => readers[reader](doc), post);
+      const info = await withPage(url, via, (doc) => readers[reader](doc, args), post);
       // iframe 被擋下時就放棄這一頁，相關欄位留空，不另開分頁
       return info || { ok: false, error: '頁面無法在 iframe 內載入' };
     } catch (err) {
@@ -56,11 +57,11 @@
     }
   }
 
-  // 同一個請求（網址＋POST 內容）只讀一次，所有請求同時讀取
+  // 同一個請求（網址＋POST 內容＋args）只讀一次，所有請求同時讀取
   async function runLookups(orders) {
     const byKey = new Map();
     for (const { apply, ...page } of orders.flatMap((o) => o.lookups)) {
-      const key = `${page.url}\n${page.post ?? ''}`;
+      const key = `${page.url}\n${page.post ?? ''}\n${page.args ? JSON.stringify(page.args) : ''}`;
       if (!byKey.has(key)) byKey.set(key, { page, waiting: [] });
       byKey.get(key).waiting.push(apply);
     }

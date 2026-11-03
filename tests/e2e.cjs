@@ -27,7 +27,7 @@ fs.rmSync(EXT, { recursive: true, force: true });
 fs.cpSync(ROOT, EXT, { recursive: true, filter: (p) => !/node_modules|\.git/.test(p) });
 const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 manifest.host_permissions = [`${ORIGIN}/*`];
-manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`, `${ORIGIN}/_member/*`, `${ORIGIN}/shop/*`, `${ORIGIN}/ogs/*`];
+manifest.content_scripts[0].matches = [`${ORIGIN}/your-orders/*`, `${ORIGIN}/purchase-history/*`, `${ORIGIN}/account*`, `${ORIGIN}/ec/*`, `${ORIGIN}/order-history/*`, `${ORIGIN}/mypage/*`, `${ORIGIN}/avx/*`, `${ORIGIN}/_member/*`, `${ORIGIN}/shop/*`, `${ORIGIN}/ogs/*`, `${ORIGIN}/weverse/*`];
 fs.writeFileSync(path.join(EXT, 'manifest.json'), JSON.stringify(manifest, null, 2));
 // 站台判斷寫死了網域，測試副本改成 localhost
 const patch = (file, from, to) => {
@@ -46,6 +46,7 @@ patch('src/content/sites/zozo.js', "/(^|\\.)zozo\\.jp$/.test(loc.hostname)", 'tr
 patch('src/content/sites/plusmember.js', "/(^|\\.)plusmember\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/kuji.js', "/(^|\\.)online-kuji\\.chiikawamarket\\.jp$/.test(loc.hostname)", 'true');
 patch('src/content/sites/officialgoods.js', "/(^|\\.)official-goods-store\\.jp$/.test(loc.hostname)", 'true');
+patch('src/content/sites/weverse.js', "/(^|\\.)weverse\\.io$/.test(loc.hostname)", 'true');
 // DNR 規則（移除 x-frame-options）也改成本機，才能驗證樂天的 iframe 讀得到
 const rules = JSON.parse(fs.readFileSync(path.join(EXT, 'rules.json'), 'utf8'));
 for (const r of rules) {
@@ -419,6 +420,38 @@ const ogsDetail = (id, sent) => `<!doctype html><html><body><div class="ogs-v2-p
   ${sent ? '<p class="ogs-v2-text size-small">お問い合わせNo:492241203624</p>' : ''}</div></div></body></html>`;
 const ogsHits = [];  // 讀了哪幾筆的詳細頁
 
+/* ---------- 模擬 Weverse Shop（React：按「配送状況照会」才跳出有伝票番号的彈窗） ----------
+ * 結構照實際頁面（tests/fixtures/weverse-*）。訂單過一下子才畫出來；按鈕按下去向 /weverse-api/ 要資料，
+ * 再把彈窗加到 body 最後面（MUI 的 Dialog 就是這樣）。
+ *   WV1 一天前、兩個賣家各一顆按鈕 → 兩個包裹
+ *   WV2 兩天前、お支払い済み（沒有按鈕）→ 不按
+ *   WV3 三十天前 → 超過七天，不按 */
+const WEVERSE = [
+  ['124000000000000001', 1, [['ALBUM A', 'ALBUM A / 1 個', 'CMA', 'CA0000000001'], ['ALBUM B', 'Ver. B / 2 個', 'EMS', 'CA0000000002']]],
+  ['124000000000000002', 2, [['ALBUM C', 'ALBUM C / 1 個', null]]],
+  ['124000000000000003', 30, [['ALBUM D', 'ALBUM D / 1 個', 'CMA', 'CA0000000003']]],
+];
+const weverseShell = `<!doctype html><html><body><div id="root"></div><script>
+const ORDERS = ${JSON.stringify(WEVERSE.map(([id, age, sections]) => [id, age, sections]))};
+const ymd = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')]; };
+const section = ([title, spec, carrier]) => '<section><ul><li><div><div>' + (carrier ? '配送準備中' : 'お支払い済み') + '</div></div>'
+  + '<a href="#none"><img src="https://cdn-contents.weverseshop.io/public/shop/' + title.replace(' ', '') + '.png" alt="' + title + '">'
+  + '<dl><p>' + title + '</p><span>' + spec + '</span></dl></a></li></ul>'
+  + (carrier ? '<div><button type="button">配送状況照会</button></div>' : '') + '</section>';
+setTimeout(() => {
+  document.getElementById('root').innerHTML = ORDERS.map(([id, age, sections]) => '<div><input type="radio" id="orderSheetGroup_' + id + '" name="g">'
+    + '<div><p><time datetime="' + ymd(age).join('-') + 'T11:41:06+09:00">' + ymd(age).join('/') + ' 10:41</time></p><p>代表注文番号 ' + id + '</p></div>'
+    + '<div>' + sections.map(section).join('') + '</div></div>').join('');
+  ORDERS.forEach(([id]) => document.getElementById('orderSheetGroup_' + id).parentElement.querySelectorAll('button').forEach((button, i) =>
+    button.addEventListener('click', async () => {
+      const { carrier, tracking } = await (await fetch('/weverse-api/track?g=' + id + '&b=' + i)).json();
+      setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<div role="dialog"><h2>配送状況照会</h2><table><tbody>'
+        + '<tr><th>伝票番号</th><td>' + tracking + '</td></tr><tr><th>配送業者</th><td>' + carrier + '</td></tr></tbody></table></div>'), 300);
+    })));
+}, 300);
+</script></body></html>`;
+const weverseHits = [];  // 按了哪幾顆按鈕（代表注文番号/第幾顆）
+
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
 <script src="https://cdn.shopify.com/s/files/1/0001/assets/theme.js"></script></head><body>
@@ -475,6 +508,18 @@ const server = http.createServer((req, res) => {
     kujiHits.push(route);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.end(JSON.stringify(kujiApi(route)));
+  }
+  if (u.pathname === '/weverse/orders') {
+    // 沒有 rules.json 涵蓋：XFO_DENY 時 iframe 一定被擋，驗證會報「讀不到」而不是無聲無息
+    if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
+    return res.end(weverseShell);
+  }
+  if (u.pathname === '/weverse-api/track') {
+    const [g, b] = [u.searchParams.get('g'), Number(u.searchParams.get('b'))];
+    weverseHits.push(`${g}/${b}`);
+    const [, , , carrier, tracking] = [null, ...WEVERSE.find(([id]) => id === g)[2][b]];
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.end(JSON.stringify({ carrier, tracking }));
   }
   if (u.pathname === '/ogs/mypage/') return res.end(ogsList);
   if (u.pathname.startsWith('/ogs/mypage/order/detail/')) {
@@ -733,6 +778,26 @@ const eq = (label, actual, expected) => {
       eq('OGS 品名 / 数量 / 画像', result.orders[0]?.items.map((i) => [i.title, i.quantity, i.imageUrl]),
         [['アクリルキーホルダー', 2, 'https://assets.official-goods-store.jp/product/PEB059/a.jpg']]);
       eq('OGS 還沒寄出的不算「讀不到」', result.missingTracking, 0);
+    }
+
+    // Weverse Shop（在隱藏 iframe 裡按「配送状況照会」，讀跳出來的彈窗）
+    {
+      const { result, secs } = await scrape(`${ORIGIN}/weverse/orders`, 'input[id^="orderSheetGroup_"]');
+      console.log(`Weverse Shop：${result.orders.length} 筆訂單、耗時 ${secs}s`);
+      eq('Weverse 站台', result.site, 'weverse');
+      const [W1] = WEVERSE[0];
+      if (XFO_DENY) {
+        // iframe 被擋下：兩顆按鈕都按不到，報 2 個讀不到
+        eq('Weverse iframe 被擋：沒按到任何按鈕', weverseHits, []);
+        eq('Weverse iframe 被擋：報 2 個讀不到', [result.orders, result.missingTracking], [[], 2]);
+      } else {
+        eq('Weverse 只按七天內那一組的兩顆按鈕', [...weverseHits].sort(), [`${W1}/0`, `${W1}/1`]);
+        eq('Weverse 一顆按鈕一個包裹', result.orders.map((o) => [o.orderId, o.orderedAt, o.total, o.carrier, o.trackingId]),
+          [[W1, isoDate(1), null, 'CMA', 'CA0000000001'], [W1, isoDate(1), null, 'EMS', 'CA0000000002']]);
+        eq('Weverse 商品各是各的', result.orders.map((o) => o.items.map((i) => [i.title, i.quantity])),
+          [[['ALBUM A', 1]], [['ALBUM B（Ver. B）', 2]]]);
+        eq('Weverse 沒有「讀不到」', result.missingTracking, 0);
+      }
     }
 
     // 只用 iframe，任何情況都不該開新分頁

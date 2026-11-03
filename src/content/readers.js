@@ -563,6 +563,43 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
       })
       .filter((item) => item.title);
 
+  /* ---------- Weverse Shop：配送状況照会（注文履歴上按按鈕跳出的彈窗） ---------- */
+
+  /* 伝票番号不在任何頁面上，要按「配送状況照会」才會跳出彈窗（MUI 的 Dialog，[role="dialog"]）。
+   * 所以在隱藏 iframe 裡打開同一頁注文履歴，按同一顆按鈕：args 是 { group: 代表注文番号, button: 那組裡第幾個 <button> }
+   * （由 sites/weverse.js 數好）。按鈕與彈窗都是 React 畫的，兩邊都要等。
+   * 彈窗裡的表格（th / td）：伝票番号・配送業者（日）、Tracking Number・Delivery service（英）、託運單號・配送公司（繁中）。
+   * 彈窗沒有表格就不算讀到 —— 寧可算進「讀不到配送資料」，也不要當成沒有伝票番号 */
+  const WEVERSE_LABELS = {
+    trackingId: /^(?:伝票番号|Tracking Number|託運單號)$/,
+    carrier: /^(?:配送業者|Delivery service|配送公司)$/,
+  };
+
+  const weverseCell = (table, label) =>
+    textOf(all(table, 'tr').find((tr) => label.test(textOf(tr.querySelector('th'))))?.querySelector('td'));
+
+  function readWeverseDialog(doc) {
+    const table = all(doc, '[role="dialog"] table').at(-1);
+    if (!table) return { ok: false, carrier: '', trackingId: '' };
+    const no = weverseCell(table, WEVERSE_LABELS.trackingId).replace(/-/g, '');
+    return {
+      ok: true,
+      carrier: weverseCell(table, WEVERSE_LABELS.carrier),
+      trackingId: /^[A-Za-z0-9]{8,}$/.test(no) ? no : '',
+    };
+  }
+
+  globalThis.OrderScraper.readers.weverseTracking = async (doc, { group, button }) => {
+    const buttonOf = (d) => {
+      const head = d.getElementById(`orderSheetGroup_${group}`);
+      return { button: head ? all(head.parentElement, 'button')[button] : null };
+    };
+    const found = await poll(doc, buttonOf, (i) => !!i.button);
+    if (!found.button) return { ok: false, error: '找不到配送状況照会' };
+    found.button.click();
+    return poll(doc, readWeverseDialog, (i) => bothReady(i.trackingId, i.carrier));
+  };
+
   globalThis.OrderScraper.readers.ogsDetail = async (doc) => {
     if (doc.querySelector('input[type="password"]')) return { signIn: true };
     if (!ogsField(doc, '受注番号')) return { ok: false, error: '不是注文詳細頁' };

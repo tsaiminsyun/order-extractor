@@ -89,6 +89,10 @@ module.exports = async function run() {
       ['a[href*="/mypage/order/detail/"]', 'src/content/sites/officialgoods.js'],
       ['.ogs-v2-list-item', 'src/content/readers.js'],
       ['お問い合わせNo', 'src/content/readers.js'],
+      ['orderSheetGroup_', 'src/content/sites/weverse.js'],
+      ['TRACK_BUTTON_RE', 'src/content/sites/weverse.js'],
+      ['WEVERSE_LABELS', 'src/content/readers.js'],
+      ['[role="dialog"]', 'src/content/readers.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

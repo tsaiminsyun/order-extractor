@@ -15,6 +15,7 @@ const CONTENT_SCRIPTS = [
   "src/content/sites/plusmember.js",
   "src/content/sites/kuji.js",
   "src/content/sites/officialgoods.js",
+  "src/content/sites/weverse.js",
   "src/content/main.js",
 ];
 
