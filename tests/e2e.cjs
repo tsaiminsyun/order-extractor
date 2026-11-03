@@ -451,6 +451,11 @@ setTimeout(() => {
 }, 300);
 </script></body></html>`;
 const weverseHits = [];  // 按了哪幾顆按鈕（代表注文番号/第幾顆）
+// 注文詳細頁（/{語系}/order/details/{代表注文番号}，這裡語系那一段是 weverse）：合計過一下子才畫出來
+const weverseDetail = `<!doctype html><html><body><div id="root"></div><script>
+setTimeout(() => { document.getElementById('root').innerHTML = '<dl><dt>商品金額</dt><dd>JPY ¥1,000</dd></dl><dl><dt>合計金額</dt><dd><span>JPY</span>¥5,500</dd></dl>'; }, 300);
+</script></body></html>`;
+const weverseDetailHits = [];  // 讀了哪幾筆的注文詳細
 
 // 第 2 頁：再一筆有追蹤號的訂單。第 3 頁是空的 —— Shopify 翻過頭就長這樣
 const shopifyAccount2 = `<!doctype html><html><head>
@@ -508,6 +513,11 @@ const server = http.createServer((req, res) => {
     kujiHits.push(route);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.end(JSON.stringify(kujiApi(route)));
+  }
+  if (u.pathname.startsWith('/weverse/order/details/')) {
+    weverseDetailHits.push(u.pathname.split('/').pop());
+    if (XFO_DENY) res.setHeader('X-Frame-Options', 'DENY');
+    return res.end(weverseDetail);
   }
   if (u.pathname === '/weverse/orders') {
     // 沒有 rules.json 涵蓋：XFO_DENY 時 iframe 一定被擋，驗證會報「讀不到」而不是無聲無息
@@ -786,6 +796,8 @@ const eq = (label, actual, expected) => {
       console.log(`Weverse Shop：${result.orders.length} 筆訂單、耗時 ${secs}s`);
       eq('Weverse 站台', result.site, 'weverse');
       const [W1] = WEVERSE[0];
+      // 被擋下也會發出請求，所以兩種情況都一樣：只讀七天內、有按鈕那一組的詳細頁
+      eq('Weverse 只讀那一組的注文詳細', weverseDetailHits, [W1]);
       if (XFO_DENY) {
         // iframe 被擋下：兩顆按鈕都按不到，報 2 個讀不到
         eq('Weverse iframe 被擋：沒按到任何按鈕', weverseHits, []);
@@ -793,7 +805,7 @@ const eq = (label, actual, expected) => {
       } else {
         eq('Weverse 只按七天內那一組的兩顆按鈕', [...weverseHits].sort(), [`${W1}/0`, `${W1}/1`]);
         eq('Weverse 一顆按鈕一個包裹', result.orders.map((o) => [o.orderId, o.orderedAt, o.total, o.carrier, o.trackingId]),
-          [[W1, isoDate(1), null, 'CMA', 'CA0000000001'], [W1, isoDate(1), null, 'EMS', 'CA0000000002']]);
+          [[W1, isoDate(1), 5500, 'CMA', 'CA0000000001'], [W1, isoDate(1), 5500, 'EMS', 'CA0000000002']]);
         eq('Weverse 商品各是各的', result.orders.map((o) => o.items.map((i) => [i.title, i.quantity])),
           [[['ALBUM A', 1]], [['ALBUM B（Ver. B）', 2]]]);
         eq('Weverse 沒有「讀不到」', result.missingTracking, 0);

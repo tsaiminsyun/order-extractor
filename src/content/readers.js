@@ -600,6 +600,16 @@ globalThis.OrderScraper ??= { sites: [], readers: {} };
     return poll(doc, readWeverseDialog, (i) => bothReady(i.trackingId, i.carrier));
   };
 
+  /* 合計只在注文詳細頁（/{語系}/order/details/{代表注文番号}）：<dl><dt>合計金額</dt><dd>JPY¥2,875</dd></dl>
+   * （英：Grand Total，繁中：付款總金額）。避開商品金額 / 稅 / 送料。
+   * 登入後才看得到，確認不了是不是伺服器渲染，所以跟彈窗一樣在 iframe 裡等它畫出來 */
+  const WEVERSE_TOTAL_RE = /^(?:合計金額|Grand Total|付款總金額)$/;
+  const readWeverseTotal = (doc) => ({
+    ok: true,
+    total: parseMoney(textOf(all(doc, 'dt').find((dt) => WEVERSE_TOTAL_RE.test(textOf(dt)))?.nextElementSibling)),
+  });
+  register('weverseTotal', readWeverseTotal, (i) => i.total != null);
+
   globalThis.OrderScraper.readers.ogsDetail = async (doc) => {
     if (doc.querySelector('input[type="password"]')) return { signIn: true };
     if (!ogsField(doc, '受注番号')) return { ok: false, error: '不是注文詳細頁' };

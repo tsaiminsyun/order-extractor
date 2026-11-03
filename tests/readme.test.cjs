@@ -93,6 +93,8 @@ module.exports = async function run() {
       ['TRACK_BUTTON_RE', 'src/content/sites/weverse.js'],
       ['WEVERSE_LABELS', 'src/content/readers.js'],
       ['[role="dialog"]', 'src/content/readers.js'],
+      ['WEVERSE_TOTAL_RE', 'src/content/readers.js'],
+      ['/order/details/', 'src/content/sites/weverse.js'],
     ];
     const missing = pairs.filter(([sel, file]) => !(md.includes(sel) && read(file).includes(sel)));
     c.eq('選擇器 README 與程式都有', missing.map(([s]) => s), []);

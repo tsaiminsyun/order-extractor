@@ -1,6 +1,6 @@
 {
   "name": "order-scraper-extension",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "private": true,
   "description": "Amazon.co.jp / 楽天 / Shopify / タワーレコード / ポケモンセンター / にじさんじ / アニメイト / mu-mo / ZOZOTOWN / plusmember / ちいかわくじ / OFFICIAL GOODS STORE / Weverse Shop 訂單擷取 Chrome 擴充功能",
   "scripts": {

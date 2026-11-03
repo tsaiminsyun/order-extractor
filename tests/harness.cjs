@@ -71,6 +71,7 @@ function setup(html, url, { pages } = {}) {
       arrayBuffer: async () => new TextEncoder().encode(body).buffer,
     };
   };
+  const progress = []; // 送給 popup 的進度訊息，依序記下
   globalThis.chrome = {
     runtime: {
       getManifest: () => ({ version: 'test' }),
@@ -78,9 +79,10 @@ function setup(html, url, { pages } = {}) {
         addListener: (fn) => listeners.push(fn),
         removeListener: (fn) => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); },
       },
-      // 擴充功能已經沒有背景程式，content script 不該再對外送訊息
+      // 擴充功能已經沒有背景程式，content script 只對 popup 報進度
       sendMessage: async (msg) => {
         if (msg?.type !== 'SCRAPE_PROGRESS') throw new Error('不應送出訊息：' + JSON.stringify(msg));
+        progress.push(msg);
       },
     },
   };
@@ -90,7 +92,7 @@ function setup(html, url, { pages } = {}) {
   const scrape = (payload = {}) =>
     new Promise((res) => listeners.at(-1)({ type: 'SCRAPE', payload: { recentDays: Infinity, ...payload } }, null, res));
   const ping = () => new Promise((res) => listeners.at(-1)({ type: 'PING' }, null, res));
-  return { dom, scrape, ping, asked, listeners };
+  return { dom, scrape, ping, asked, listeners, progress };
 }
 
 /* ---------- 斷言 ---------- */

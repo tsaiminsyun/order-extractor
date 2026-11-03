@@ -9,7 +9,8 @@
  * **伝票番号不在任何頁面上**，要按那顆按鈕跳出彈窗才看得到（讀取器在 readers.js 的 weverseTracking）：
  * 在隱藏 iframe 裡打開同一頁、按同一顆按鈕。一顆按鈕一個包裹。
  *
- * 合計只在注文詳細頁（合計金額），但列表頁上的商品連結是 href="#none"，詳細頁的網址拿不到，所以合計留空。
+ * 合計只在注文詳細頁（讀取器 weverseTotal）。列表頁上的商品連結是 href="#none"，詳細頁的網址照使用者給的實際網址組：
+ *   https://shop.weverse.io/ja/order/details/124145358465579817（en / zh-tw 也一樣，只換第一段）
  * 狀態只看過お支払い済み / 配送準備中，送達後的寫法還沒看過，只靠七天。
  */
 (() => {
@@ -45,6 +46,12 @@
     return all(section || group, 'li').filter((li) => li.querySelector('dl')).map(readItem).filter((i) => i.title);
   }
 
+  // 注文詳細頁：/{語系}/order/details/{代表注文番号}，語系取目前這一頁網址的第一段
+  const detailUrl = (pageUrl, orderId) => {
+    const url = new URL(pageUrl);
+    return new URL(`/${url.pathname.split('/')[1]}/order/details/${orderId}`, url.origin).href;
+  };
+
   function readGroup(input, pageUrl) {
     const group = input.parentElement;
     const orderId = input.id.slice(GROUP_PREFIX.length);
@@ -77,6 +84,15 @@
       });
     });
     order.shipments = [...slots];
+    // 有包裹要讀的才去讀合計；讀不到就留空，不影響包裹
+    if (slots.length) {
+      order.lookups.push({
+        url: detailUrl(pageUrl, orderId),
+        reader: 'weverseTotal',
+        via: 'frame',
+        apply: (info) => { order.total = info.total ?? null; },
+      });
+    }
     return order;
   }
 

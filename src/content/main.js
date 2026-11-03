@@ -58,22 +58,31 @@
   }
 
   // 同一個請求（網址＋POST 內容＋args）只讀一次，所有請求同時讀取
+  // 進度以「訂單」計：一筆訂單可能要讀好幾頁（Weverse：彈窗＋詳細頁），全部讀完才算一筆。
+  // 以頁數計的話，只有一筆訂單卻顯示「1 / 2」，看起來像有兩筆
   async function runLookups(orders) {
     const byKey = new Map();
-    for (const { apply, ...page } of orders.flatMap((o) => o.lookups)) {
-      const key = `${page.url}\n${page.post ?? ''}\n${page.args ? JSON.stringify(page.args) : ''}`;
-      if (!byKey.has(key)) byKey.set(key, { page, waiting: [] });
-      byKey.get(key).waiting.push(apply);
+    const pagesLeft = new Map(); // 訂單 → 還沒讀完的頁數
+    for (const order of orders) {
+      for (const { apply, ...page } of order.lookups) {
+        const key = `${page.url}\n${page.post ?? ''}\n${page.args ? JSON.stringify(page.args) : ''}`;
+        if (!byKey.has(key)) byKey.set(key, { page, waiting: [] });
+        byKey.get(key).waiting.push({ apply, order });
+        pagesLeft.set(order, (pagesLeft.get(order) || 0) + 1);
+      }
     }
 
-    const total = byKey.size;
+    const total = pagesLeft.size;
     let done = 0;
     progress({ phase: 'lookup', done, total });
     await Promise.all([...byKey.values()].map(async ({ page, waiting }) => {
       const info = await readPage(page);
-      progress({ phase: 'lookup', done: ++done, total });
-      // 讀失敗或需要重新登入的頁面，相關欄位留空
-      if (info.ok) for (const apply of waiting) apply(info);
+      for (const { apply, order } of waiting) {
+        // 讀失敗或需要重新登入的頁面，相關欄位留空
+        if (info.ok) apply(info);
+        pagesLeft.set(order, pagesLeft.get(order) - 1);
+        if (pagesLeft.get(order) === 0) progress({ phase: 'lookup', done: ++done, total });
+      }
     }));
   }
 
